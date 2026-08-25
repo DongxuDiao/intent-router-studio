@@ -1,0 +1,69 @@
+[project]
+name = "intent-router-studio-backend"
+version = "0.1.0"
+description = "本地意图路由器训练与可视化平台 - 后端"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "python-multipart>=0.0.9",
+    "pandas>=2.2",
+    "pyarrow>=15.0",
+    "openpyxl>=3.1",
+    "scikit-learn>=1.4",
+    "scipy>=1.12",
+    "numpy>=1.26",
+    "psutil>=5.9",
+    "setfit>=1.1.0",
+    "sentence-transformers>=2.6",
+    "transformers>=4.38,<5",  # setfit 1.1.x 仍引用 transformers 5 中已删除的 default_logdir
+    "datasets>=2.18",
+    "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# 静态质量门禁（修改方案 V2 §5.3）：CI 执行 ruff check backend，新增代码不得引入新告警
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle 错误
+    "W",   # pycodestyle 警告
+    "F",   # pyflakes（未用导入/变量/未定义名等真实缺陷）
+    "I",   # import 排序
+    "B",   # bugbear 常见陷阱
+    "UP",  # pyupgrade 现代语法
+]
+ignore = [
+    "E501", # 行长超限提示改为人工评审（大量中文注释场景收益低）
+    "B008", # FastAPI 惯用法：Depends()/File() 等工厂函数作参数默认值
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*" = ["I001", "E402"]  # 迁移脚本保持生成器原样
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "smoke: 需要下载真实模型的慢速测试",
+]

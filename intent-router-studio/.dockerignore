@@ -1,0 +1,24 @@
+# 版本控制与本地状态
+.git
+.gitignore
+.claude
+
+# 数据与缓存（体积大且不应进镜像）
+var/
+frontend/node_modules
+frontend/dist
+backend/.pytest_cache
+backend/**/__pycache__
+**/__pycache__
+*.pyc
+
+# 本地环境文件
+.env
+.env.local
+.venv
+venv/
+
+# 文档与 CI（镜像内不需要）
+*.md
+playwright-report/
+test-results/

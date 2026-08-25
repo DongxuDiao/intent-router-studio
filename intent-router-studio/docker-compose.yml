@@ -1,0 +1,106 @@
+# 镜像以非 root 用户（uid 10001）运行（修改方案 V2 §5.1）；bind mount 的
+# ./var 需对该 UID 可写，首次部署执行：sudo chown -R 10001:10001 ./var
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 显式构建运行时阶段：Dockerfile 末尾的 test 阶段带 tests/dev 依赖，不进生产
+      target: runtime
+      args:
+        # 国内网络用镜像源加速构建（海外环境可改回官方源）
+        BASE_REGISTRY: docker.m.daocloud.io
+        APT_MIRROR: mirrors.tuna.tsinghua.edu.cn
+        NPM_REGISTRY: https://registry.npmmirror.com
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+    image: intent-router-studio:latest
+    container_name: irs-api
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      # 只绑定本机回环地址（设计文档安全默认：不对外网暴露）
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # SQLite + 制品库 + HF 缓存共享卷（api 与 worker 共用）
+      - ./var:/data/var
+      # 示例数据（冒烟测试用）
+      - ./examples:/data/examples:ro
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      DATABASE_URL: sqlite:////data/var/app.db
+      ARTIFACT_ROOT: /data/var
+      HF_HOME: /data/var/hf-cache
+      LOG_RAW_TEXT: "false"
+      # Query 改写（修改方案 §4/§9.4）：默认 shadow，rewriter 独立容器
+      REWRITER_URL: http://rewriter:8010
+      REWRITE_TIMEOUT_MS: "90000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+  worker:
+    image: intent-router-studio:latest
+    container_name: irs-worker
+    command: ["python", "-m", "app.worker.main"]
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./var:/data/var
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:////data/var/app.db
+      ARTIFACT_ROOT: /data/var
+      HF_HOME: /data/var/hf-cache
+      LOG_RAW_TEXT: "false"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 6g
+
+  # Query 改写独立服务（修改方案 §5.3）：生成模型与 API/Worker 资源隔离，
+  # 失败不影响路由；仅内网 expose，不映射宿主机端口
+  rewriter:
+    image: intent-router-studio:latest
+    container_name: irs-rewriter
+    command: ["python", "-m", "app.rewriter.main"]
+    volumes:
+      - ./var:/data/var
+    environment:
+      APP_ENV: production
+      HF_HOME: /data/var/hf-cache
+      REWRITE_PROVIDER: local_qwen
+      REWRITE_MODEL_ID: Qwen/Qwen3-0.6B
+      REWRITE_DEVICE: auto
+      REWRITE_MAX_NEW_TOKENS: "96"
+      REWRITE_PORT: "8010"
+      # 生成线程数对齐性能核数：混合大小核 CPU 上超线程反而拖慢（见 qwen_provider）
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      REWRITE_TORCH_THREADS: "4"
+      # V2 §3.3 有界准入：在途+排队调用者上限，满了 429 REWRITER_BUSY 回退原文
+      REWRITE_QUEUE_CAPACITY: "2"
+      # 软超时后继续排空当前生成；仅超过硬上限才销毁异常 worker
+      REWRITE_WORKER_HARD_TIMEOUT: "180"
+    expose:
+      - "8010"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8010/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3g

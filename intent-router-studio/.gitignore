@@ -1,0 +1,34 @@
+# 本地运行时数据与制品
+var/
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/.vite/
+*.tsbuildinfo
+
+# 环境与 IDE
+.env
+.env.local
+.idea/
+.vscode/
+.DS_Store
+
+# 测试产物
+coverage/
+.playwright-report/
+test-results/

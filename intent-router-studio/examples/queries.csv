@@ -1,0 +1,401 @@
+﻿text,label,group_id,context,source,risk_slice,is_hard_negative
+什么是置信区间？,information,information-tpl-06,,synthetic,,false
+麻烦帮我看下审批到哪一步了,read_only,read_only-tpl-02,,synthetic,readonly_vs_write,true
+打开窗户。,oos,oos-tpl-12,你是想查看状态还是撤回 Review？,synthetic,,false
+关闭实验 999 的告警。,write_action,write_action-tpl-17,,synthetic,,false
+帮我看下最近的实验列表，谢谢,read_only,read_only-tpl-07,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦实验 654 的置信区间是多少？,read_only,read_only-tpl-06,,synthetic,,false
+看下昨天实验组的转化率,read_only,read_only-tpl-04,,synthetic,,false
+看看咋回事,unclear,unclear-tpl-18,,synthetic,,false
+实验 456 现在跑得怎么样了？，谢谢,read_only,read_only-tpl-01,,synthetic,,false
+帮我弄一下。,unclear,unclear-tpl-07,,synthetic,missing_object,true
+查一下 Review 88 的进度。,read_only,read_only-tpl-09,你是想查看状态还是撤回 Review？,synthetic,readonly_vs_write,false
+麻烦实验 666 的观察周期到几号？,read_only,read_only-tpl-17,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦现在有多少个进行中的实验？,read_only,read_only-tpl-15,,synthetic,,false
+看下昨天实验组的转化率，谢谢,read_only,read_only-tpl-04,,synthetic,,false
+指标异动一般有哪些原因？，谢谢,information,information-tpl-16,,synthetic,,false
+给实验 888 添加一个指标，谢谢,write_action,write_action-tpl-16,,synthetic,,false
+如何给实验添加分流组？,information,information-tpl-02,,synthetic,,false
+麻烦实验 789 的核心指标是多少？,read_only,read_only-tpl-03,,synthetic,,false
+分层实验是什么概念？，谢谢,information,information-tpl-12,,synthetic,,false
+把实验 333 的观察期延长一周。,write_action,write_action-tpl-14,,synthetic,,false
+帮我优化下实验。,unclear,unclear-tpl-05,,synthetic,,false
+明天几点开会,oos,oos-tpl-10,你是想查看状态还是撤回 Review？,synthetic,,false
+Review 流程是什么样的？,information,information-tpl-03,,synthetic,,false
+帮我跟一下这个事,unclear,unclear-tpl-10,,synthetic,,false
+撤销刚才的提交，谢谢,write_action,write_action-tpl-06,,synthetic,,false
+麻烦什么是 MAB 实验？,information,information-tpl-19,,synthetic,,false
+麻烦实验好像没跑起来,unclear,unclear-tpl-12,,synthetic,,false
+帮我创建一个实验，谢谢,write_action,write_action-tpl-00,,synthetic,qa_vs_write,true
+帮我创建一个实验,write_action,write_action-tpl-00,,synthetic,qa_vs_write,false
+实验报告支持导出吗？,information,information-tpl-10,,synthetic,,false
+搞一下昨天说的那个。,unclear,unclear-tpl-14,,synthetic,missing_object,true
+帮我预订会议室。,oos,oos-tpl-00,,synthetic,oos_near_domain,true
+查一下 Review 88 的进度，谢谢,read_only,read_only-tpl-09,,synthetic,readonly_vs_write,false
+帮我弄个东西,unclear,unclear-tpl-19,,synthetic,missing_object,true
+创建一个新实验,write_action,write_action-tpl-01,,synthetic,,false
+把实验 333 的观察期延长一周,write_action,write_action-tpl-14,,synthetic,,false
+怎么写实验结论？，谢谢,information,information-tpl-11,,synthetic,,false
+最小可检测提升是什么？。,information,information-tpl-18,,synthetic,,false
+麻烦怎么理解实验的显著性结果？,information,information-tpl-07,,synthetic,,false
+麻烦什么是置信区间？,information,information-tpl-06,你是想查看状态还是撤回 Review？,synthetic,,false
+今天限行尾号是多少，谢谢,oos,oos-tpl-17,你是想查看状态还是撤回 Review？,synthetic,,false
+实验 777 的指标趋势如何？,read_only,read_only-tpl-19,,synthetic,,false
+实验 777 的指标趋势如何？，谢谢,read_only,read_only-tpl-19,,synthetic,,false
+启动实验 456，谢谢,write_action,write_action-tpl-04,,synthetic,,false
+麻烦指标异动一般有哪些原因？,information,information-tpl-16,,synthetic,,false
+查实验 321 的分流比例,read_only,read_only-tpl-05,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我读一下实验报告里的结论。,read_only,read_only-tpl-18,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我新建一个实验,write_action,write_action-tpl-02,你是想查看状态还是撤回 Review？,synthetic,,false
+处理一下告警,unclear,unclear-tpl-04,,synthetic,missing_object,true
+麻烦今天天气怎么样,oos,oos-tpl-01,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我看看这个，谢谢,unclear,unclear-tpl-01,你是想查看状态还是撤回 Review？,synthetic,missing_object,false
+设置一个明天 7 点的闹钟,oos,oos-tpl-13,你是想查看状态还是撤回 Review？,synthetic,,false
+怎么查看实验的指标口径说明？。,information,information-tpl-04,,synthetic,,false
+提交实验 654 的 Review，谢谢,write_action,write_action-tpl-11,,synthetic,,false
+这个数不对吧,unclear,unclear-tpl-11,,synthetic,,false
+麻烦帮我处理一下这个实验,unclear,unclear-tpl-00,,synthetic,missing_object,true
+Libra 怎么创建实验？。,information,information-tpl-00,,synthetic,qa_vs_write,true
+帮我预订会议室,oos,oos-tpl-00,你是想查看状态还是撤回 Review？,synthetic,oos_near_domain,true
+查一下实验 123 的状态。,read_only,read_only-tpl-00,你是想查看状态还是撤回 Review？,synthetic,readonly_vs_write,true
+怎么估算实验所需样本量？,information,information-tpl-17,,synthetic,,false
+帮我确认实验 333 是否已经结束,read_only,read_only-tpl-12,,synthetic,,false
+麻烦实验报告支持导出吗？,information,information-tpl-10,,synthetic,,false
+帮我跟一下这个事，谢谢,unclear,unclear-tpl-10,,synthetic,,false
+帮我发一封邮件给老板,oos,oos-tpl-11,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦帮我新建一个实验,write_action,write_action-tpl-02,,synthetic,,false
+帮我优化下实验,unclear,unclear-tpl-05,,synthetic,,false
+帮我查一下股价,oos,oos-tpl-07,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦设置一个明天 7 点的闹钟,oos,oos-tpl-13,,synthetic,,false
+麻烦把实验 789 的分流比例改成 50/50,write_action,write_action-tpl-07,,synthetic,,false
+创建实验有哪些前置条件？。,information,information-tpl-01,,synthetic,qa_vs_write,true
+那个东西怎么不对，谢谢,unclear,unclear-tpl-06,,synthetic,,false
+麻烦看下昨天实验组的转化率,read_only,read_only-tpl-04,,synthetic,,false
+帮我想想办法。,unclear,unclear-tpl-13,,synthetic,,false
+实验好像没跑起来，谢谢,unclear,unclear-tpl-12,,synthetic,,false
+麻烦搞一下昨天说的那个,unclear,unclear-tpl-14,你是想查看状态还是撤回 Review？,synthetic,missing_object,true
+实验 654 的置信区间是多少？。,read_only,read_only-tpl-06,,synthetic,,false
+麻烦分层实验是什么概念？,information,information-tpl-12,,synthetic,,false
+看下我负责的实验,read_only,read_only-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+关闭实验 999 的告警,write_action,write_action-tpl-17,,synthetic,,false
+帮我确认实验 333 是否已经结束，谢谢,read_only,read_only-tpl-12,,synthetic,,false
+给实验 888 添加一个指标,write_action,write_action-tpl-16,,synthetic,,false
+帮我抢一张演唱会门票。,oos,oos-tpl-15,,synthetic,,false
+帮我创建一个实验。,write_action,write_action-tpl-00,,synthetic,qa_vs_write,true
+麻烦撤销刚才的提交,write_action,write_action-tpl-06,,synthetic,,false
+麻烦告警规则在哪里配置？,information,information-tpl-09,你是想查看状态还是撤回 Review？,synthetic,,false
+那个东西怎么不对。,unclear,unclear-tpl-06,,synthetic,,false
+麻烦创建实验有哪些前置条件？,information,information-tpl-01,你是想查看状态还是撤回 Review？,synthetic,qa_vs_write,true
+麻烦帮我发一封邮件给老板,oos,oos-tpl-11,,synthetic,,false
+把实验 333 的观察期延长一周，谢谢,write_action,write_action-tpl-14,你是想查看状态还是撤回 Review？,synthetic,,false
+如何配置实验的观察周期？，谢谢,information,information-tpl-08,,synthetic,,false
+麻烦怎么查看实验的指标口径说明？,information,information-tpl-04,你是想查看状态还是撤回 Review？,synthetic,,false
+查一下实验 123 的状态，谢谢,read_only,read_only-tpl-00,你是想查看状态还是撤回 Review？,synthetic,readonly_vs_write,true
+怎么理解实验的显著性结果？,information,information-tpl-07,,synthetic,,false
+提交实验 654 的 Review。,write_action,write_action-tpl-11,,synthetic,,false
+帮我优化下实验，谢谢,unclear,unclear-tpl-05,,synthetic,,false
+麻烦看下实验 222 的显著性能不能通过,read_only,read_only-tpl-11,,synthetic,,false
+麻烦帮我订外卖,oos,oos-tpl-05,,synthetic,,false
+实验 666 的观察周期到几号？。,read_only,read_only-tpl-17,,synthetic,,false
+怎么注册新公司，谢谢,oos,oos-tpl-18,你是想查看状态还是撤回 Review？,synthetic,,false
+把实验 321 标记为已完成，谢谢,write_action,write_action-tpl-09,,synthetic,,false
+帮我写一份周报，谢谢,oos,oos-tpl-02,,synthetic,,false
+帮我看看这个。,unclear,unclear-tpl-01,,synthetic,missing_object,true
+实验 777 的指标趋势如何？。,read_only,read_only-tpl-19,,synthetic,,false
+麻烦查一下 Review 88 的进度,read_only,read_only-tpl-09,你是想查看状态还是撤回 Review？,synthetic,readonly_vs_write,false
+设置一个明天 7 点的闹钟。,oos,oos-tpl-13,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我看下审批到哪一步了。,read_only,read_only-tpl-02,,synthetic,readonly_vs_write,true
+恢复实验 222 的运行,write_action,write_action-tpl-13,,synthetic,,false
+删除实验 111,write_action,write_action-tpl-12,,synthetic,,false
+告警规则在哪里配置？,information,information-tpl-09,,synthetic,,false
+帮我催一下审批,write_action,write_action-tpl-10,,synthetic,readonly_vs_write,true
+麻烦给实验 888 添加一个指标,write_action,write_action-tpl-16,,synthetic,,false
+告警规则在哪里配置？。,information,information-tpl-09,,synthetic,,false
+新人怎么申请 Libra 权限？,information,information-tpl-15,,synthetic,,false
+麻烦给实验加一个告警规则,write_action,write_action-tpl-08,,synthetic,,false
+恢复实验 222 的运行。,write_action,write_action-tpl-13,,synthetic,,false
+看看能不能救一下这个实验。,unclear,unclear-tpl-09,,synthetic,,false
+这边显示有问题,unclear,unclear-tpl-15,,synthetic,,false
+Libra 怎么创建实验？,information,information-tpl-00,,synthetic,qa_vs_write,true
+把实验 321 标记为已完成,write_action,write_action-tpl-09,,synthetic,,false
+帮我订外卖,oos,oos-tpl-05,,synthetic,,false
+麻烦帮我优化下实验,unclear,unclear-tpl-05,,synthetic,,false
+Libra 支持哪些统计方式？，谢谢,information,information-tpl-05,,synthetic,,false
+删除实验 111，谢谢,write_action,write_action-tpl-12,,synthetic,,false
+麻烦订一张明天去上海的机票,oos,oos-tpl-03,,synthetic,,false
+帮我写一份周报,oos,oos-tpl-02,你是想查看状态还是撤回 Review？,synthetic,,false
+删除实验 111。,write_action,write_action-tpl-12,,synthetic,,false
+如何配置实验的观察周期？。,information,information-tpl-08,,synthetic,,false
+这个数不对吧。,unclear,unclear-tpl-11,,synthetic,,false
+怎么设置对照组？。,information,information-tpl-13,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦关闭实验 999 的告警,write_action,write_action-tpl-17,,synthetic,,false
+麻烦帮我写一份周报,oos,oos-tpl-02,你是想查看状态还是撤回 Review？,synthetic,,false
+提交实验 654 的 Review,write_action,write_action-tpl-11,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我看下最近的实验列表。,read_only,read_only-tpl-07,,synthetic,,false
+什么是 MAB 实验？,information,information-tpl-19,你是想查看状态还是撤回 Review？,synthetic,,false
+实验 111 有没有触发告警？。,read_only,read_only-tpl-08,,synthetic,,false
+麻烦实验 111 有没有触发告警？,read_only,read_only-tpl-08,,synthetic,,false
+看下昨天实验组的转化率。,read_only,read_only-tpl-04,,synthetic,,false
+翻译这段英文。,oos,oos-tpl-08,,synthetic,,false
+Libra 是否支持暂停实验？。,information,information-tpl-14,,synthetic,oos_near_domain,true
+实验 654 的置信区间是多少？，谢谢,read_only,read_only-tpl-06,,synthetic,,false
+把实验 321 标记为已完成。,write_action,write_action-tpl-09,,synthetic,,false
+麻烦新人怎么申请 Libra 权限？,information,information-tpl-15,你是想查看状态还是撤回 Review？,synthetic,,false
+查一下快递单号 12345,oos,oos-tpl-19,,synthetic,,false
+写一首诗,oos,oos-tpl-09,,synthetic,,false
+看下我负责的实验。,read_only,read_only-tpl-16,,synthetic,,false
+这边显示有问题，谢谢,unclear,unclear-tpl-15,,synthetic,,false
+麻烦帮我读一下实验报告里的结论,read_only,read_only-tpl-18,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦看下我负责的实验,read_only,read_only-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+怎么查看实验的指标口径说明？，谢谢,information,information-tpl-04,,synthetic,,false
+帮我查一下股价。,oos,oos-tpl-07,,synthetic,,false
+麻烦写一首诗,oos,oos-tpl-09,,synthetic,,false
+怎么查看实验的指标口径说明？,information,information-tpl-04,,synthetic,,false
+怎么理解实验的显著性结果？。,information,information-tpl-07,,synthetic,,false
+麻烦是不是哪里配置错了,unclear,unclear-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+是不是哪里配置错了,unclear,unclear-tpl-16,,synthetic,,false
+帮我新建一个实验，谢谢,write_action,write_action-tpl-02,,synthetic,,false
+给实验加一个告警规则。,write_action,write_action-tpl-08,,synthetic,,false
+这个实验有点问题，谢谢,unclear,unclear-tpl-03,,synthetic,,false
+今天限行尾号是多少,oos,oos-tpl-17,,synthetic,,false
+今天天气怎么样。,oos,oos-tpl-01,你是想查看状态还是撤回 Review？,synthetic,,false
+实验组这周的数据怎么样？,read_only,read_only-tpl-10,,synthetic,,false
+麻烦帮我撤回 Review 123,write_action,write_action-tpl-05,你是想查看状态还是撤回 Review？,synthetic,readonly_vs_write,true
+看下我负责的实验，谢谢,read_only,read_only-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦把实验 123 暂停掉,write_action,write_action-tpl-03,你是想查看状态还是撤回 Review？,synthetic,,false
+播放一首歌，谢谢,oos,oos-tpl-04,,synthetic,,false
+看看能不能救一下这个实验，谢谢,unclear,unclear-tpl-09,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦帮我创建一个实验,write_action,write_action-tpl-00,,synthetic,qa_vs_write,true
+把实验 123 暂停掉。,write_action,write_action-tpl-03,,synthetic,,false
+最小可检测提升是什么？，谢谢,information,information-tpl-18,,synthetic,,false
+麻烦这个数不对吧,unclear,unclear-tpl-11,,synthetic,,false
+怎么注册新公司,oos,oos-tpl-18,,synthetic,,false
+麻烦如何给实验添加分流组？,information,information-tpl-02,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我弄个东西。,unclear,unclear-tpl-19,你是想查看状态还是撤回 Review？,synthetic,missing_object,true
+如何配置实验的观察周期？,information,information-tpl-08,,synthetic,,false
+查实验 555 的运行日志,read_only,read_only-tpl-14,,synthetic,,false
+麻烦怎么注册新公司,oos,oos-tpl-18,,synthetic,,false
+什么是 MAB 实验？。,information,information-tpl-19,,synthetic,,false
+怎么写实验结论？。,information,information-tpl-11,,synthetic,,false
+实验 789 的核心指标是多少？,read_only,read_only-tpl-03,,synthetic,,false
+看看咋回事。,unclear,unclear-tpl-18,,synthetic,,false
+处理一下告警，谢谢,unclear,unclear-tpl-04,,synthetic,missing_object,true
+是不是哪里配置错了。,unclear,unclear-tpl-16,,synthetic,,false
+翻译这段英文，谢谢,oos,oos-tpl-08,,synthetic,,false
+最小可检测提升是什么？,information,information-tpl-18,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦把它改一下,unclear,unclear-tpl-02,你是想查看状态还是撤回 Review？,synthetic,missing_object,true
+实验 444 的创建人是谁？，谢谢,read_only,read_only-tpl-13,,synthetic,,false
+实验 666 的观察周期到几号？，谢谢,read_only,read_only-tpl-17,,synthetic,,false
+麻烦帮我跟一下这个事,unclear,unclear-tpl-10,,synthetic,,false
+麻烦报销单怎么填,oos,oos-tpl-14,,synthetic,oos_near_domain,true
+麻烦实验组这周的数据怎么样？,read_only,read_only-tpl-10,,synthetic,,false
+帮我想想办法,unclear,unclear-tpl-13,,synthetic,,false
+看看咋回事，谢谢,unclear,unclear-tpl-18,,synthetic,,false
+报销单怎么填。,oos,oos-tpl-14,你是想查看状态还是撤回 Review？,synthetic,oos_near_domain,true
+麻烦怎么写实验结论？,information,information-tpl-11,,synthetic,,false
+把实验报告发送给团队群，谢谢,write_action,write_action-tpl-18,,synthetic,,false
+是不是哪里配置错了，谢谢,unclear,unclear-tpl-16,,synthetic,,false
+麻烦删除实验 111,write_action,write_action-tpl-12,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我发一封邮件给老板。,oos,oos-tpl-11,,synthetic,,false
+查一下实验 123 的状态,read_only,read_only-tpl-00,,synthetic,readonly_vs_write,true
+分层实验是什么概念？。,information,information-tpl-12,,synthetic,,false
+帮我订外卖。,oos,oos-tpl-05,,synthetic,,false
+怎么理解实验的显著性结果？，谢谢,information,information-tpl-07,,synthetic,,false
+麻烦libra 是否支持暂停实验？,information,information-tpl-14,你是想查看状态还是撤回 Review？,synthetic,oos_near_domain,true
+今天天气怎么样,oos,oos-tpl-01,,synthetic,,false
+帮我把实验组流量调到 80%,write_action,write_action-tpl-15,,synthetic,,false
+写一首诗。,oos,oos-tpl-09,你是想查看状态还是撤回 Review？,synthetic,,false
+查一下 Review 88 的进度,read_only,read_only-tpl-09,,synthetic,readonly_vs_write,true
+这个数不对吧，谢谢,unclear,unclear-tpl-11,,synthetic,,false
+推荐一部电影，谢谢,oos,oos-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦打开窗户,oos,oos-tpl-12,,synthetic,,false
+现在有多少个进行中的实验？,read_only,read_only-tpl-15,,synthetic,,false
+把实验 789 的分流比例改成 50/50，谢谢,write_action,write_action-tpl-07,,synthetic,,false
+处理一下告警。,unclear,unclear-tpl-04,,synthetic,missing_object,true
+帮我看下审批到哪一步了,read_only,read_only-tpl-02,,synthetic,readonly_vs_write,true
+麻烦实验 444 的创建人是谁？,read_only,read_only-tpl-13,,synthetic,,false
+现在有多少个进行中的实验？。,read_only,read_only-tpl-15,你是想查看状态还是撤回 Review？,synthetic,,false
+把实验报告发送给团队群。,write_action,write_action-tpl-18,,synthetic,,false
+实验 789 的核心指标是多少？，谢谢,read_only,read_only-tpl-03,,synthetic,,false
+实验 666 的观察周期到几号？,read_only,read_only-tpl-17,,synthetic,,false
+帮我新建一个实验。,write_action,write_action-tpl-02,,synthetic,,false
+帮我跟一下这个事。,unclear,unclear-tpl-10,你是想查看状态还是撤回 Review？,synthetic,,false
+新人怎么申请 Libra 权限？，谢谢,information,information-tpl-15,,synthetic,,false
+麻烦帮我想想办法,unclear,unclear-tpl-13,,synthetic,,false
+麻烦查实验 321 的分流比例,read_only,read_only-tpl-05,,synthetic,,false
+Libra 是否支持暂停实验？,information,information-tpl-14,,synthetic,oos_near_domain,false
+麻烦最小可检测提升是什么？,information,information-tpl-18,,synthetic,,false
+麻烦libra 支持哪些统计方式？,information,information-tpl-05,,synthetic,,false
+创建实验有哪些前置条件？,information,information-tpl-01,,synthetic,qa_vs_write,true
+帮我催一下审批，谢谢,write_action,write_action-tpl-10,,synthetic,readonly_vs_write,true
+播放一首歌,oos,oos-tpl-04,,synthetic,,false
+分析实验 123 为什么异常，谢谢,unclear,unclear-tpl-08,,synthetic,,false
+帮我撤回 Review 123，谢谢,write_action,write_action-tpl-05,,synthetic,readonly_vs_write,false
+麻烦帮我弄一下,unclear,unclear-tpl-07,你是想查看状态还是撤回 Review？,synthetic,missing_object,false
+实验组这周的数据怎么样？。,read_only,read_only-tpl-10,你是想查看状态还是撤回 Review？,synthetic,,false
+启动实验 456,write_action,write_action-tpl-04,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我处理一下这个实验。,unclear,unclear-tpl-00,,synthetic,missing_object,false
+那个东西怎么不对,unclear,unclear-tpl-06,你是想查看状态还是撤回 Review？,synthetic,,false
+明天几点开会，谢谢,oos,oos-tpl-10,,synthetic,,false
+帮我弄一下，谢谢,unclear,unclear-tpl-07,,synthetic,missing_object,false
+实验 654 的置信区间是多少？,read_only,read_only-tpl-06,,synthetic,,false
+撤销刚才的提交,write_action,write_action-tpl-06,你是想查看状态还是撤回 Review？,synthetic,,false
+搞一下昨天说的那个，谢谢,unclear,unclear-tpl-14,,synthetic,missing_object,true
+帮我确认下情况。,unclear,unclear-tpl-17,,synthetic,,false
+分层实验是什么概念？,information,information-tpl-12,,synthetic,,false
+麻烦帮我预订会议室,oos,oos-tpl-00,,synthetic,oos_near_domain,true
+麻烦这个实验有点问题,unclear,unclear-tpl-03,,synthetic,,false
+Libra 怎么创建实验？，谢谢,information,information-tpl-00,,synthetic,qa_vs_write,false
+帮我弄一下,unclear,unclear-tpl-07,,synthetic,missing_object,false
+怎么估算实验所需样本量？，谢谢,information,information-tpl-17,,synthetic,,false
+这个实验有点问题,unclear,unclear-tpl-03,,synthetic,,false
+播放一首歌。,oos,oos-tpl-04,,synthetic,,false
+怎么注册新公司。,oos,oos-tpl-18,你是想查看状态还是撤回 Review？,synthetic,,false
+给实验 888 添加一个指标。,write_action,write_action-tpl-16,,synthetic,,false
+麻烦怎么估算实验所需样本量？,information,information-tpl-17,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦实验 456 现在跑得怎么样了？,read_only,read_only-tpl-01,,synthetic,,false
+实验 444 的创建人是谁？,read_only,read_only-tpl-13,,synthetic,,false
+帮我撤回 Review 123。,write_action,write_action-tpl-05,,synthetic,readonly_vs_write,false
+帮我查一下股价，谢谢,oos,oos-tpl-07,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦帮我抢一张演唱会门票,oos,oos-tpl-15,,synthetic,,false
+麻烦翻译这段英文,oos,oos-tpl-08,,synthetic,,false
+创建一个新实验，谢谢,write_action,write_action-tpl-01,,synthetic,,false
+这个实验有点问题。,unclear,unclear-tpl-03,,synthetic,,false
+报销单怎么填，谢谢,oos,oos-tpl-14,,synthetic,oos_near_domain,true
+设置一个明天 7 点的闹钟，谢谢,oos,oos-tpl-13,,synthetic,,false
+附近有什么好吃的餐厅，谢谢,oos,oos-tpl-06,,synthetic,,false
+给实验 101 复制一份新版本。,write_action,write_action-tpl-19,,synthetic,,false
+这边显示有问题。,unclear,unclear-tpl-15,你是想查看状态还是撤回 Review？,synthetic,,false
+关闭实验 999 的告警，谢谢,write_action,write_action-tpl-17,你是想查看状态还是撤回 Review？,synthetic,,false
+附近有什么好吃的餐厅。,oos,oos-tpl-06,你是想查看状态还是撤回 Review？,synthetic,,false
+怎么写实验结论？,information,information-tpl-11,,synthetic,,false
+看下实验 222 的显著性能不能通过。,read_only,read_only-tpl-11,,synthetic,,false
+创建一个新实验。,write_action,write_action-tpl-01,你是想查看状态还是撤回 Review？,synthetic,,false
+查实验 555 的运行日志。,read_only,read_only-tpl-14,,synthetic,,false
+帮我抢一张演唱会门票,oos,oos-tpl-15,,synthetic,,false
+麻烦帮我弄个东西,unclear,unclear-tpl-19,,synthetic,missing_object,true
+麻烦帮我看看这个,unclear,unclear-tpl-01,,synthetic,missing_object,true
+今天限行尾号是多少。,oos,oos-tpl-17,,synthetic,,false
+查实验 555 的运行日志，谢谢,read_only,read_only-tpl-14,,synthetic,,false
+麻烦那个东西怎么不对,unclear,unclear-tpl-06,,synthetic,,false
+帮我看下审批到哪一步了，谢谢,read_only,read_only-tpl-02,,synthetic,readonly_vs_write,false
+帮我把实验组流量调到 80%，谢谢,write_action,write_action-tpl-15,,synthetic,,false
+今天天气怎么样，谢谢,oos,oos-tpl-01,,synthetic,,false
+麻烦把实验报告发送给团队群,write_action,write_action-tpl-18,,synthetic,,false
+撤销刚才的提交。,write_action,write_action-tpl-06,,synthetic,,false
+帮我把实验组流量调到 80%。,write_action,write_action-tpl-15,,synthetic,,false
+怎么设置对照组？，谢谢,information,information-tpl-13,,synthetic,,false
+把它改一下，谢谢,unclear,unclear-tpl-02,你是想查看状态还是撤回 Review？,synthetic,missing_object,true
+附近有什么好吃的餐厅,oos,oos-tpl-06,,synthetic,,false
+创建实验有哪些前置条件？，谢谢,information,information-tpl-01,,synthetic,qa_vs_write,true
+把实验 123 暂停掉，谢谢,write_action,write_action-tpl-03,,synthetic,,false
+麻烦处理一下告警,unclear,unclear-tpl-04,,synthetic,missing_object,false
+订一张明天去上海的机票，谢谢,oos,oos-tpl-03,,synthetic,,false
+把实验 789 的分流比例改成 50/50。,write_action,write_action-tpl-07,,synthetic,,false
+写一首诗，谢谢,oos,oos-tpl-09,,synthetic,,false
+分析实验 123 为什么异常,unclear,unclear-tpl-08,,synthetic,,false
+启动实验 456。,write_action,write_action-tpl-04,你是想查看状态还是撤回 Review？,synthetic,,false
+Libra 支持哪些统计方式？。,information,information-tpl-05,,synthetic,,false
+实验好像没跑起来。,unclear,unclear-tpl-12,,synthetic,,false
+新人怎么申请 Libra 权限？。,information,information-tpl-15,,synthetic,,false
+帮我读一下实验报告里的结论，谢谢,read_only,read_only-tpl-18,你是想查看状态还是撤回 Review？,synthetic,,false
+怎么设置对照组？,information,information-tpl-13,你是想查看状态还是撤回 Review？,synthetic,,false
+看下实验 222 的显著性能不能通过,read_only,read_only-tpl-11,,synthetic,,false
+告警规则在哪里配置？，谢谢,information,information-tpl-09,,synthetic,,false
+查实验 321 的分流比例。,read_only,read_only-tpl-05,,synthetic,,false
+麻烦帮我催一下审批,write_action,write_action-tpl-10,,synthetic,readonly_vs_write,true
+给实验加一个告警规则,write_action,write_action-tpl-08,,synthetic,,false
+查一下快递单号 12345，谢谢,oos,oos-tpl-19,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦帮我确认下情况,unclear,unclear-tpl-17,你是想查看状态还是撤回 Review？,synthetic,,false
+明天几点开会。,oos,oos-tpl-10,,synthetic,,false
+搞一下昨天说的那个,unclear,unclear-tpl-14,,synthetic,missing_object,true
+麻烦怎么设置对照组？,information,information-tpl-13,,synthetic,,false
+麻烦实验 777 的指标趋势如何？,read_only,read_only-tpl-19,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦查一下实验 123 的状态,read_only,read_only-tpl-00,你是想查看状态还是撤回 Review？,synthetic,readonly_vs_write,true
+帮我预订会议室，谢谢,oos,oos-tpl-00,,synthetic,oos_near_domain,true
+麻烦看看咋回事,unclear,unclear-tpl-18,,synthetic,,false
+帮我确认下情况，谢谢,unclear,unclear-tpl-17,,synthetic,,false
+实验 456 现在跑得怎么样了？。,read_only,read_only-tpl-01,,synthetic,,false
+把实验 789 的分流比例改成 50/50,write_action,write_action-tpl-07,,synthetic,,false
+麻烦帮我确认实验 333 是否已经结束,read_only,read_only-tpl-12,,synthetic,,false
+给实验 101 复制一份新版本，谢谢,write_action,write_action-tpl-19,,synthetic,,false
+麻烦帮我看下最近的实验列表,read_only,read_only-tpl-07,,synthetic,,false
+麻烦明天几点开会,oos,oos-tpl-10,,synthetic,,false
+Libra 是否支持暂停实验？，谢谢,information,information-tpl-14,,synthetic,oos_near_domain,false
+帮我处理一下这个实验，谢谢,unclear,unclear-tpl-00,,synthetic,missing_object,true
+指标异动一般有哪些原因？,information,information-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+实验组这周的数据怎么样？，谢谢,read_only,read_only-tpl-10,你是想查看状态还是撤回 Review？,synthetic,,false
+什么是 MAB 实验？，谢谢,information,information-tpl-19,,synthetic,,false
+打开窗户,oos,oos-tpl-12,你是想查看状态还是撤回 Review？,synthetic,,false
+如何给实验添加分流组？，谢谢,information,information-tpl-02,,synthetic,,false
+查实验 321 的分流比例，谢谢,read_only,read_only-tpl-05,,synthetic,,false
+看下实验 222 的显著性能不能通过，谢谢,read_only,read_only-tpl-11,,synthetic,,false
+麻烦review 流程是什么样的？,information,information-tpl-03,,synthetic,,false
+Libra 支持哪些统计方式？,information,information-tpl-05,,synthetic,,false
+订一张明天去上海的机票。,oos,oos-tpl-03,,synthetic,,false
+麻烦如何配置实验的观察周期？,information,information-tpl-08,,synthetic,,false
+订一张明天去上海的机票,oos,oos-tpl-03,,synthetic,,false
+实验 111 有没有触发告警？，谢谢,read_only,read_only-tpl-08,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦启动实验 456,write_action,write_action-tpl-04,你是想查看状态还是撤回 Review？,synthetic,,false
+什么是置信区间？，谢谢,information,information-tpl-06,,synthetic,,false
+看看能不能救一下这个实验,unclear,unclear-tpl-09,你是想查看状态还是撤回 Review？,synthetic,,false
+如何给实验添加分流组？。,information,information-tpl-02,,synthetic,,false
+帮我处理一下这个实验,unclear,unclear-tpl-00,,synthetic,missing_object,true
+实验报告支持导出吗？。,information,information-tpl-10,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我确认实验 333 是否已经结束。,read_only,read_only-tpl-12,,synthetic,,false
+麻烦恢复实验 222 的运行,write_action,write_action-tpl-13,,synthetic,,false
+现在有多少个进行中的实验？，谢谢,read_only,read_only-tpl-15,,synthetic,,false
+翻译这段英文,oos,oos-tpl-08,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦推荐一部电影,oos,oos-tpl-16,,synthetic,,false
+麻烦帮我查一下股价,oos,oos-tpl-07,你是想查看状态还是撤回 Review？,synthetic,,false
+把实验报告发送给团队群,write_action,write_action-tpl-18,,synthetic,,false
+帮我看下最近的实验列表,read_only,read_only-tpl-07,,synthetic,,false
+麻烦创建一个新实验,write_action,write_action-tpl-01,,synthetic,,false
+查一下快递单号 12345。,oos,oos-tpl-19,你是想查看状态还是撤回 Review？,synthetic,,false
+实验 444 的创建人是谁？。,read_only,read_only-tpl-13,,synthetic,,false
+什么是置信区间？。,information,information-tpl-06,你是想查看状态还是撤回 Review？,synthetic,,false
+实验 789 的核心指标是多少？。,read_only,read_only-tpl-03,,synthetic,,false
+给实验 101 复制一份新版本,write_action,write_action-tpl-19,,synthetic,,false
+怎么估算实验所需样本量？。,information,information-tpl-17,,synthetic,,false
+麻烦把实验 333 的观察期延长一周,write_action,write_action-tpl-14,,synthetic,,false
+帮我写一份周报。,oos,oos-tpl-02,你是想查看状态还是撤回 Review？,synthetic,,false
+实验报告支持导出吗？，谢谢,information,information-tpl-10,,synthetic,,false
+帮我发一封邮件给老板，谢谢,oos,oos-tpl-11,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦播放一首歌,oos,oos-tpl-04,,synthetic,,false
+实验好像没跑起来,unclear,unclear-tpl-12,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦这边显示有问题,unclear,unclear-tpl-15,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我催一下审批。,write_action,write_action-tpl-10,,synthetic,readonly_vs_write,true
+Review 流程是什么样的？。,information,information-tpl-03,,synthetic,,false
+分析实验 123 为什么异常。,unclear,unclear-tpl-08,,synthetic,,false
+帮我弄个东西，谢谢,unclear,unclear-tpl-19,,synthetic,missing_object,true
+指标异动一般有哪些原因？。,information,information-tpl-16,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦给实验 101 复制一份新版本,write_action,write_action-tpl-19,,synthetic,,false
+实验 456 现在跑得怎么样了？,read_only,read_only-tpl-01,,synthetic,,false
+打开窗户，谢谢,oos,oos-tpl-12,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦提交实验 654 的 Review,write_action,write_action-tpl-11,,synthetic,,false
+麻烦附近有什么好吃的餐厅,oos,oos-tpl-06,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我订外卖，谢谢,oos,oos-tpl-05,,synthetic,,false
+把实验 123 暂停掉,write_action,write_action-tpl-03,,synthetic,,false
+麻烦查一下快递单号 12345,oos,oos-tpl-19,,synthetic,,false
+Review 流程是什么样的？，谢谢,information,information-tpl-03,,synthetic,,false
+把它改一下,unclear,unclear-tpl-02,,synthetic,missing_object,true
+麻烦帮我把实验组流量调到 80%,write_action,write_action-tpl-15,,synthetic,,false
+麻烦查实验 555 的运行日志,read_only,read_only-tpl-14,,synthetic,,false
+推荐一部电影,oos,oos-tpl-16,,synthetic,,false
+把它改一下。,unclear,unclear-tpl-02,,synthetic,missing_object,true
+实验 111 有没有触发告警？,read_only,read_only-tpl-08,,synthetic,,false
+帮我确认下情况,unclear,unclear-tpl-17,,synthetic,,false
+麻烦看看能不能救一下这个实验,unclear,unclear-tpl-09,,synthetic,,false
+报销单怎么填,oos,oos-tpl-14,,synthetic,oos_near_domain,false
+帮我抢一张演唱会门票，谢谢,oos,oos-tpl-15,,synthetic,,false
+麻烦分析实验 123 为什么异常,unclear,unclear-tpl-08,,synthetic,,false
+恢复实验 222 的运行，谢谢,write_action,write_action-tpl-13,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦把实验 321 标记为已完成,write_action,write_action-tpl-09,,synthetic,,false
+推荐一部电影。,oos,oos-tpl-16,,synthetic,,false
+帮我读一下实验报告里的结论,read_only,read_only-tpl-18,,synthetic,,false
+帮我撤回 Review 123,write_action,write_action-tpl-05,,synthetic,readonly_vs_write,true
+麻烦libra 怎么创建实验？,information,information-tpl-00,,synthetic,qa_vs_write,true
+帮我看看这个,unclear,unclear-tpl-01,,synthetic,missing_object,false
+给实验加一个告警规则，谢谢,write_action,write_action-tpl-08,你是想查看状态还是撤回 Review？,synthetic,,false
+帮我想想办法，谢谢,unclear,unclear-tpl-13,你是想查看状态还是撤回 Review？,synthetic,,false
+麻烦今天限行尾号是多少,oos,oos-tpl-17,你是想查看状态还是撤回 Review？,synthetic,,false

@@ -1,0 +1,187 @@
+/** 标注台：键盘 1-5 快速打标，支持过滤未标注；仅 DRAFT 数据集可编辑。 */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Alert, Button, Card, Checkbox, Input, Space, Spin, Tag, Typography, message } from 'antd'
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { api, ApiError } from '../api/client'
+import { LabelTag, PageHeader } from '../components/common'
+import { useProject } from '../store/project'
+import { LABELS, LABEL_NAMES } from '../types'
+import type { DatasetVersion, Sample } from '../types'
+
+const KEY_TO_LABEL: Record<string, string> = {
+  '1': 'information',
+  '2': 'read_only',
+  '3': 'write_action',
+  '4': 'unclear',
+  '5': 'oos',
+}
+
+export default function LabelWorkbench() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const { projectId } = useProject()
+  const [unlabeledOnly, setUnlabeledOnly] = useState(true)
+  const [q, setQ] = useState('')
+  const [page, setPage] = useState(1)
+  const [cursor, setCursor] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  const dataset = useQuery({
+    queryKey: ['dataset', id],
+    queryFn: () => api<DatasetVersion>(`/datasets/${id}`),
+  })
+  const samples = useQuery({
+    queryKey: ['samples-label', id, unlabeledOnly, q, page],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), page_size: '50' })
+      if (unlabeledOnly) params.set('unlabeled_only', 'true')
+      if (q) params.set('q', q)
+      return api<{ samples: Sample[]; total: number; page: number }>(`/datasets/${id}/samples?${params}`)
+    },
+  })
+
+  const list = samples.data?.samples ?? []
+  const current = list[cursor]
+
+  const patch = useMutation({
+    mutationFn: (payload: { label?: string; is_hard_negative?: boolean }) =>
+      api(`/datasets/${id}/samples/${current!.sample_id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    onSuccess: (_d, payload) => {
+      message.success({ content: `已标注 → ${payload.label ? LABEL_NAMES[payload.label] : '难负例'}（${current!.sample_id.slice(0, 10)}…）`, duration: 0.8 })
+      qc.invalidateQueries({ queryKey: ['samples-label', id] })
+      qc.invalidateQueries({ queryKey: ['dataset', id] })
+      if (cursor >= list.length - 1) {
+        if ((samples.data?.total ?? 0) > page * 50) setPage((p) => p + 1)
+        setCursor(0)
+      } else {
+        setCursor((c) => c + 1)
+      }
+    },
+    onError: (e) => {
+      if (e instanceof ApiError) message.error(`${e.code}: ${e.message}`)
+    },
+  })
+
+  // 键盘快捷键 1-5
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (busy || !current) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const label = KEY_TO_LABEL[e.key]
+      if (label) {
+        setBusy(true)
+        patch.mutate({ label }, { onSettled: () => setBusy(false) })
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [current, busy])
+
+  const d = dataset.data
+  if (dataset.isLoading) return <Card loading />
+  if (!d) return <Alert type="error" message="数据集不存在" />
+  if (d.status !== 'DRAFT') {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message="该数据集已冻结（FROZEN），不可直接编辑"
+        description="冻结保证可复现性。如需修正，可在详情页基于错误样本创建 DRAFT 新版本（错误回流）后再标注。"
+        action={<Button onClick={() => navigate(`/datasets/${d.id}`)}>返回详情</Button>}
+      />
+    )
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title={`标注台 · ${d.name}`}
+        subTitle={`共 ${d.sample_count} 样本，未标注 ${d.unlabeled_count}；快捷键 1-5 打标并自动跳下一条`}
+        extra={<Button onClick={() => navigate(`/datasets/${d.id}`)}>返回详情</Button>}
+      />
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Checkbox
+          checked={unlabeledOnly}
+          onChange={(e) => {
+            setUnlabeledOnly(e.target.checked)
+            setPage(1)
+            setCursor(0)
+          }}
+        >
+          只看未标注
+        </Checkbox>
+        <Input.Search
+          placeholder="过滤文本…"
+          style={{ width: 240 }}
+          allowClear
+          onSearch={(v) => {
+            setQ(v)
+            setPage(1)
+            setCursor(0)
+          }}
+        />
+        <Typography.Text type="secondary">
+          第 {page} 页 · 匹配 {samples.data?.total ?? 0} 条 · 当前第 {cursor + 1}/{list.length} 条
+        </Typography.Text>
+      </Space>
+
+      <Card>
+        {samples.isLoading ? (
+          <Spin />
+        ) : !current ? (
+          <Alert type="success" showIcon message="没有更多样本了 🎉" description="可返回详情页校验并创建切分" />
+        ) : (
+          <>
+            {current.context && (
+              <div style={{ marginBottom: 8 }}>
+                <Tag color="geekblue">context</Tag>
+                <Typography.Text type="secondary">{current.context}</Typography.Text>
+              </div>
+            )}
+            <Typography.Paragraph style={{ fontSize: 18 }}>{current.text}</Typography.Paragraph>
+            <Space wrap style={{ marginBottom: 16 }}>
+              {LABELS.map((l, i) => (
+                <Button
+                  key={l}
+                  type={current.label === l ? 'primary' : 'default'}
+                  loading={busy && patch.variables?.label === l}
+                  onClick={() => {
+                    setBusy(true)
+                    patch.mutate({ label: l }, { onSettled: () => setBusy(false) })
+                  }}
+                >
+                  {i + 1} · {LABEL_NAMES[l]}
+                </Button>
+              ))}
+            </Space>
+            <div>
+              <Space>
+                <Checkbox
+                  checked={current.is_hard_negative}
+                  onChange={(e) => patch.mutate({ is_hard_negative: e.target.checked })}
+                >
+                  难负例（hard negative）
+                </Checkbox>
+                {current.risk_slice && <Tag color="volcano">risk_slice: {current.risk_slice}</Tag>}
+                {current.label && <LabelTag label={current.label} />}
+                <Button size="small" onClick={() => setCursor((c) => Math.min(c + 1, list.length - 1))}>跳过</Button>
+              </Space>
+            </div>
+            <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 12 }}>
+              sample_id {current.sample_id} · hash {current.normalized_hash.slice(0, 16)}…
+              {current.group_id ? ` · group ${current.group_id}` : ''}
+            </Typography.Paragraph>
+          </>
+        )}
+      </Card>
+      <div style={{ marginTop: 12 }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          提示：所有修改即时保存；标注完成后在详情页「重新校验」确认无错误即可切分训练。
+          {projectId ? '' : ''}
+        </Typography.Text>
+      </div>
+    </div>
+  )
+}
