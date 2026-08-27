@@ -49,7 +49,7 @@ services:
   worker:
     image: intent-router-studio:latest
     container_name: irs-worker
-    command: ["python", "-m", "app.worker.main"]
+    command: ["python", "-m", "app.worker.supervisor"]
     depends_on:
       api:
         condition: service_healthy

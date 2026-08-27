@@ -271,13 +271,15 @@ CSV 文件支持 UTF-8 和 GBK 自动探测。若中文预览异常，建议先�
 
 | 预设 | 默认参数 | 适用场景 |
 |---|---|---|
-| quick | epochs=2，iterations=10 | 冒烟验证、演示、检查数据链路 |
-| standard | epochs=5，iterations=20 | 日常训练与方案比较 |
-| strict | epochs=10，iterations=30 | 正式候选模型，耗时更长 |
+| quick | epochs=1，iterations=3，batch=4 | 低内存冒烟验证、演示、检查数据链路 |
+| standard | epochs=2，iterations=5，batch=8 | 日常训练与方案比较 |
+| strict | epochs=5，iterations=10，batch=8 | 正式候选模型，耗时更长 |
 
 底座模型默认为 `BAAI/bge-small-zh-v1.5`，分类训练使用 SetFit。
 
 Docker 中一般使用 CPU；Mac 原生运行可以自动使用 MPS。
+
+SetFit 会按 `num_iterations` 扩展对比学习样本。为避免 CPU Worker 被 OOM killer 终止，系统在提交前限制 `样本数 × num_iterations ≤ 150,000`；超过上限时请降低 iterations 或拆分数据集。训练配置默认使用 `max_length=128`，需要更高内存时再手动调大。
 
 ### 8.3 安全约束
 
@@ -651,7 +653,7 @@ docker compose logs --tail=200 api worker
 docker compose logs -f worker
 ```
 
-训练卡住、失败或无法取消时，应优先查看 Worker 日志。
+训练卡住、失败或无法取消时，应优先查看 Worker 日志。若错误码为 `WORKER_OOM`，表示子进程收到 `SIGKILL`（通常是 exit 137/内存不足）；若为 `WORKER_RESTART`，表示容器级重启恢复了遗留任务。
 
 ### 13.4 健康检查
 

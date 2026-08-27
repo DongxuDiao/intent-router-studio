@@ -10,6 +10,7 @@ import { useProject } from '../store/project'
 import { LABELS, LABEL_NAMES } from '../types'
 import type { DatasetVersion, PreviewData, Upload as UploadInfo } from '../types'
 import { fmtBytes } from '../utils/format'
+import { isLabelMappingComplete, resolveLabelMapping } from '../utils/importMapping'
 
 const TARGET_FIELDS = [
   { key: 'text', label: 'text *', required: true },
@@ -103,7 +104,7 @@ export default function UploadWizard() {
   }
 
   const canImport = !!preview && !!columns.text && (mode !== 'single_label' || defaultLabel) &&
-    distinctLabels.every((l) => labelMapping[l] === '__skip__' || (labelMapping[l] && LABELS.includes(labelMapping[l] as never)))
+    isLabelMappingComplete(distinctLabels, labelMapping)
 
   if (!projectId) return <Alert type="info" showIcon message="请先选择项目" />
 
@@ -230,7 +231,7 @@ export default function UploadWizard() {
                     width: 220,
                     render: (_, r: { raw: string }) => (
                       <select
-                        value={labelMapping[r.raw] ?? (LABELS.includes(r.raw as never) ? r.raw : '')}
+                        value={resolveLabelMapping(r.raw, labelMapping)}
                         onChange={(e) => {
                           setLabelMapping((m) => ({ ...m, [r.raw]: e.target.value }))
                           setMappingError(null)
@@ -249,7 +250,7 @@ export default function UploadWizard() {
                     title: '预览',
                     width: 110,
                     render: (_, r: { raw: string }) => {
-                      const v = labelMapping[r.raw] ?? (LABELS.includes(r.raw as never) ? r.raw : '')
+                      const v = resolveLabelMapping(r.raw, labelMapping)
                       return v === '__skip__' ? <span>跳过</span> : v ? <LabelTag label={v} /> : <Typography.Text type="danger">未映射</Typography.Text>
                     },
                   },

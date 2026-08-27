@@ -18,7 +18,7 @@ from app.models import AuditEvent, DatasetSplit, DatasetVersion, ModelVersion, P
 from app.router_core.policy import Thresholds
 from app.router_core.taxonomy import LABELS
 from app.router_core.threshold_search import DEFAULT_SEARCH_SPEC, route_metrics
-from app.router_core.training import TrainConfig
+from app.router_core.training import TrainConfig, validate_resource_budget
 from app.services import artifact_service, dataset_service
 
 # ---------------------------------------------------------------- 生命周期互斥锁（V2 §3.5）
@@ -100,7 +100,12 @@ def create_run(db: Session, project_id: str, dataset_version_id: str, name: str,
     except ValueError as exc:
         raise ApiError("VALIDATION_ERROR", str(exc), 422) from exc
 
-    full_config = {"train": train_cfg.to_dict(), "threshold_search": search_spec}
+    try:
+        resource_preflight = validate_resource_budget(dataset.sample_count, train_cfg)
+    except ValueError as exc:
+        raise ApiError("TRAINING_RESOURCE_LIMIT", str(exc), 422) from exc
+
+    full_config = {"train": train_cfg.to_dict(), "threshold_search": search_spec, "resource_preflight": resource_preflight}
 
     # V2 §3.6：Run 创建时固定 Split。Worker 执行时按 run.split_id 解析，
     # 不再取"最新"——杜绝创建到执行之间新建 split 导致的训练数据漂移；

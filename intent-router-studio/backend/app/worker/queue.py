@@ -102,8 +102,13 @@ def transition_status(
     return result.rowcount > 0
 
 
-def recover_stale_runs(db: Session) -> int:
-    """Worker 启动时把遗留的运行态任务标记为 INTERRUPTED（QUEUED 保留）。"""
+def recover_stale_runs(
+    db: Session,
+    *,
+    error_code: str = "WORKER_RESTART",
+    error_message: str = "Worker 重启，运行中断，可重试",
+) -> int:
+    """把遗留的运行态任务标记为 INTERRUPTED（QUEUED 保留）。"""
     in_list = ",".join(f"'{s}'" for s in RUNNING_STATUSES)
     now = datetime.now(UTC).isoformat()
     result = db.execute(
@@ -116,7 +121,7 @@ def recover_stale_runs(db: Session) -> int:
             WHERE status IN ({in_list})
             """
         ),
-        {"now": now, "error": json.dumps({"code": "WORKER_RESTART", "message": "Worker 重启，运行中断，可重试"}, ensure_ascii=False)},
+        {"now": now, "error": json.dumps({"code": error_code, "message": error_message}, ensure_ascii=False)},
     )
     db.commit()
     return result.rowcount

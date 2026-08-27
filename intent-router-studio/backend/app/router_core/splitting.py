@@ -122,8 +122,9 @@ def validate_split(df: pd.DataFrame, label_col: str = "label") -> list[dict]:
             }
         )
 
-    if "group_id" in df.columns:
-        grouped = df.dropna(subset=["group_id"]).groupby("group_id")["split"].nunique()
+    effective_groups = _effective_group_values(df)
+    if effective_groups is not None:
+        grouped = df.assign(_effective_group=effective_groups).groupby("_effective_group")["split"].nunique()
         leaked = grouped[grouped > 1]
         if len(leaked):
             problems.append(
@@ -147,13 +148,13 @@ def validate_split(df: pd.DataFrame, label_col: str = "label") -> list[dict]:
                         "details": {"split": split, "missing_labels": missing},
                     }
                 )
-        if "group_id" in df.columns:
+        if effective_groups is not None:
             train_rows = df[df["split"] == "train"]
+            train_groups = effective_groups.loc[train_rows.index]
             for lab in sorted(present_labels):
                 has_group = (
-                    train_rows.loc[train_rows[label_col].astype(str) == lab, "group_id"]
-                    .dropna()
-                    .astype(str)
+                    train_groups.loc[train_rows[label_col].astype(str) == lab]
+                    .loc[lambda s: s != "ungrouped"]
                     .nunique()
                 )
                 if has_group == 0:
@@ -176,6 +177,21 @@ def validate_split(df: pd.DataFrame, label_col: str = "label") -> list[dict]:
                 }
             )
     return problems
+
+
+def _effective_group_values(df: pd.DataFrame) -> pd.Series | None:
+    """返回与 group_split 一致的分组键：group_id 优先，normalized_hash 兜底。"""
+    if "group_id" not in df.columns and "normalized_hash" not in df.columns:
+        return None
+    if "group_id" in df.columns:
+        groups = df["group_id"].fillna("").astype(str).str.strip()
+    else:
+        groups = pd.Series("", index=df.index, dtype="string")
+    if "normalized_hash" in df.columns:
+        hashes = df["normalized_hash"].fillna("").astype(str).str.strip()
+        fallback = hashes.map(lambda value: f"hash:{value}" if value else "ungrouped")
+        groups = groups.where(groups.ne(""), fallback)
+    return groups
 
 
 def ensure_splits_trainable(df: pd.DataFrame, label_col: str = "label") -> None:

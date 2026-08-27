@@ -9,9 +9,9 @@ import { useProject } from '../store/project'
 import type { DatasetVersion, TrainingRun } from '../types'
 
 const PRESETS: Record<string, { label: string; note: string; cfg: Record<string, number> }> = {
-  quick: { label: 'quick（冒烟/演示）', note: 'epochs=2, iterations=10，几分钟内完成', cfg: { num_epochs: 2, num_iterations: 10, batch_size: 16 } },
-  standard: { label: 'standard（常规）', note: 'epochs=5, iterations=20', cfg: { num_epochs: 5, num_iterations: 20, batch_size: 16 } },
-  strict: { label: 'strict（更高质量）', note: 'epochs=10, iterations=30，耗时更长', cfg: { num_epochs: 10, num_iterations: 30, batch_size: 16 } },
+  quick: { label: 'quick（低内存演示）', note: 'epochs=1, iterations=3, batch=4', cfg: { num_epochs: 1, num_iterations: 3, batch_size: 4 } },
+  standard: { label: 'standard（常规）', note: 'epochs=2, iterations=5, batch=8', cfg: { num_epochs: 2, num_iterations: 5, batch_size: 8 } },
+  strict: { label: 'strict（更高质量）', note: 'epochs=5, iterations=10, batch=8', cfg: { num_epochs: 5, num_iterations: 10, batch_size: 8 } },
 }
 
 const PARAM_BOUNDS = {
@@ -27,10 +27,10 @@ export default function NewRun() {
   const navigate = useNavigate()
   const [datasetId, setDatasetId] = useState<string | null>(null)
   const [preset, setPreset] = useState('quick')
-  const [numEpochs, setNumEpochs] = useState(2)
-  const [numIterations, setNumIterations] = useState(10)
-  const [batchSize, setBatchSize] = useState(16)
-  const [maxLength, setMaxLength] = useState(256)
+  const [numEpochs, setNumEpochs] = useState(1)
+  const [numIterations, setNumIterations] = useState(3)
+  const [batchSize, setBatchSize] = useState(4)
+  const [maxLength, setMaxLength] = useState(128)
   const [seed, setSeed] = useState(42)
   const [learningRate, setLearningRate] = useState(2e-5)
   const [maxFwr, setMaxFwr] = useState(0.005)
@@ -46,6 +46,8 @@ export default function NewRun() {
   const trainable = (d: DatasetVersion) =>
     d.status === 'FROZEN' && (d.quality_report?.errors.length ?? 0) === 0 && (d.unlabeled_count ?? 0) === 0
   const selected = datasets.data?.items.find((d) => d.id === datasetId)
+  const pairSamples = (selected?.sample_count ?? 0) * numIterations
+  const overResourceBudget = pairSamples > 150_000
 
   const submit = useMutation({
     mutationFn: () =>
@@ -123,24 +125,32 @@ export default function NewRun() {
             style={{ marginBottom: 16 }}
           />
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-            {PRESETS[preset].note}。所有参数受白名单范围约束（超出将 422 拒绝）。
+            {PRESETS[preset].note}。所有参数受白名单范围约束；对比样本预算上限为 150,000（超出将无法提交）。
           </Typography.Text>
+          {selected && overResourceBudget && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={`当前配置预计 ${pairSamples.toLocaleString()} 个对比样本，超过 150,000 上限；请降低 num_iterations 或拆分数据集。`}
+            />
+          )}
           <Space wrap size="large">
             <div>
               <Typography.Text type="secondary">num_epochs [{PARAM_BOUNDS.num_epochs.join(', ')}]</Typography.Text>
-              <div><InputNumber min={PARAM_BOUNDS.num_epochs[0]} max={PARAM_BOUNDS.num_epochs[1]} value={numEpochs} onChange={(v) => setNumEpochs(v ?? 2)} /></div>
+              <div><InputNumber min={PARAM_BOUNDS.num_epochs[0]} max={PARAM_BOUNDS.num_epochs[1]} value={numEpochs} onChange={(v) => setNumEpochs(v ?? 1)} /></div>
             </div>
             <div>
               <Typography.Text type="secondary">num_iterations [{PARAM_BOUNDS.num_iterations.join(', ')}]</Typography.Text>
-              <div><InputNumber min={PARAM_BOUNDS.num_iterations[0]} max={PARAM_BOUNDS.num_iterations[1]} value={numIterations} onChange={(v) => setNumIterations(v ?? 10)} /></div>
+              <div><InputNumber min={PARAM_BOUNDS.num_iterations[0]} max={PARAM_BOUNDS.num_iterations[1]} value={numIterations} onChange={(v) => setNumIterations(v ?? 3)} /></div>
             </div>
             <div>
               <Typography.Text type="secondary">batch_size [{PARAM_BOUNDS.batch_size.join(', ')}]</Typography.Text>
-              <div><InputNumber min={PARAM_BOUNDS.batch_size[0]} max={PARAM_BOUNDS.batch_size[1]} value={batchSize} onChange={(v) => setBatchSize(v ?? 16)} /></div>
+              <div><InputNumber min={PARAM_BOUNDS.batch_size[0]} max={PARAM_BOUNDS.batch_size[1]} value={batchSize} onChange={(v) => setBatchSize(v ?? 4)} /></div>
             </div>
             <div>
               <Typography.Text type="secondary">max_length [{PARAM_BOUNDS.max_length.join(', ')}]</Typography.Text>
-              <div><InputNumber min={PARAM_BOUNDS.max_length[0]} max={PARAM_BOUNDS.max_length[1]} step={32} value={maxLength} onChange={(v) => setMaxLength(v ?? 256)} /></div>
+              <div><InputNumber min={PARAM_BOUNDS.max_length[0]} max={PARAM_BOUNDS.max_length[1]} step={32} value={maxLength} onChange={(v) => setMaxLength(v ?? 128)} /></div>
             </div>
             <div>
               <Typography.Text type="secondary">seed</Typography.Text>
@@ -180,7 +190,7 @@ export default function NewRun() {
   2,
 )}
           </pre>
-          <Button type="primary" size="large" disabled={!datasetId} loading={submit.isPending} onClick={() => submit.mutate()}>
+          <Button type="primary" size="large" disabled={!datasetId || overResourceBudget} loading={submit.isPending} onClick={() => submit.mutate()}>
             提交训练（进入队列，Worker 异步执行）
           </Button>
         </Card>

@@ -45,7 +45,9 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        recovered = queue.recover_stale_runs(db)
+        recovered = 0
+        if os.getenv("WORKER_SKIP_RECOVERY") != "1":
+            recovered = queue.recover_stale_runs(db)
         if recovered:
             logger.info("恢复检查：%d 个遗留运行态任务标记为 INTERRUPTED", recovered)
         queued = db.query(TrainingRun).filter(TrainingRun.status == "QUEUED").count()

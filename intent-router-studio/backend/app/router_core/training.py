@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -27,10 +28,15 @@ PARAM_RANGES = {
     "num_iterations": (1, 50),
 }
 
+# SetFit 会按 num_iterations 扩展对比学习样本；这个乘积是 CPU 内存的
+# 主要先验风险信号。超过上限时在入队前拒绝，避免训练进程被 OOM killer
+# 直接杀死后只能显示为 WORKER_RESTART。
+MAX_TRAINING_PAIR_SAMPLES = 150_000
+
 PRESETS = {
-    "quick": {"num_epochs": 2, "num_iterations": 10, "batch_size": 16},
-    "standard": {"num_epochs": 5, "num_iterations": 20, "batch_size": 16},
-    "strict": {"num_epochs": 10, "num_iterations": 30, "batch_size": 16},
+    "quick": {"num_epochs": 1, "num_iterations": 3, "batch_size": 4},
+    "standard": {"num_epochs": 2, "num_iterations": 5, "batch_size": 8},
+    "strict": {"num_epochs": 5, "num_iterations": 10, "batch_size": 8},
 }
 
 
@@ -39,12 +45,12 @@ class TrainConfig:
     base_model_id: str = "BAAI/bge-small-zh-v1.5"
     seed: int = 42
     device: str = "auto"
-    max_length: int = 256
-    batch_size: int = 16
-    num_epochs: int = 5
+    max_length: int = 128
+    batch_size: int = 8
+    num_epochs: int = 2
     body_learning_rate: float = 2e-5
     sampling_strategy: str = "oversampling"
-    num_iterations: int = 20
+    num_iterations: int = 5
     normalize_embeddings: bool = True
     max_text_chars: int = 4000
 
@@ -71,6 +77,33 @@ def validate_config(cfg: TrainConfig) -> dict[str, str]:
     if cfg.device not in ("auto", "cpu", "cuda", "mps"):
         errors["device"] = f"不支持的设备 {cfg.device}"
     return errors
+
+
+def training_pair_samples(sample_count: int, config: TrainConfig) -> int:
+    """估算 SetFit 对比学习样本规模，供入队前资源预检使用。"""
+    return max(0, int(sample_count)) * max(1, int(config.num_iterations))
+
+
+def validate_resource_budget(
+    sample_count: int,
+    config: TrainConfig,
+    max_pair_samples: int = MAX_TRAINING_PAIR_SAMPLES,
+) -> dict[str, int | str]:
+    """返回资源预检结果；超预算抛出带操作建议的 ValueError。"""
+    pair_samples = training_pair_samples(sample_count, config)
+    if pair_samples > max_pair_samples:
+        raise ValueError(
+            "训练资源预算超限: "
+            f"样本数 {sample_count} × num_iterations {config.num_iterations} = {pair_samples:,}, "
+            f"上限 {max_pair_samples:,}。请降低 num_iterations 或拆分数据集后重试。"
+        )
+    return {
+        "sample_count": int(sample_count),
+        "num_iterations": int(config.num_iterations),
+        "pair_samples": pair_samples,
+        "max_pair_samples": int(max_pair_samples),
+        "status": "ok",
+    }
 
 
 def resolve_device(requested: str = "auto") -> str:
@@ -179,6 +212,15 @@ def train_router(
     """
     import time
 
+    # SetFit/HuggingFace 的部分版本会把 checkpoint 默认写到相对路径
+    # ``checkpoints``。Worker 的当前目录是镜像内的 /app，非 root 用户不可写，
+    # 因而必须把训练过程的 cwd 固定到本次 Run 的可写临时制品目录。
+    workdir = Path(workdir).resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = workdir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    previous_cwd = Path.cwd()
+
     set_all_seeds(config.seed)
     device = resolve_device(config.device)
 
@@ -213,34 +255,38 @@ def train_router(
 
     from setfit import SetFitTrainer, TrainingArguments  # noqa: F401 兼容不同版本
 
+    os.chdir(workdir)
     try:
-        trainer = SetFitTrainer(
-            model=model,
-            train_dataset=train_dataset,
-            num_iterations=config.num_iterations,
-            num_epochs=config.num_epochs,
-            batch_size=config.batch_size,
-            body_learning_rate=config.body_learning_rate,
-            column_mapping={"text": "text", "label": "label"},
-        )
-    except TypeError:
-        # 新版本 SetFit 只暴露 Trainer + TrainingArguments
-        from setfit import Trainer
+        try:
+            trainer = SetFitTrainer(
+                model=model,
+                train_dataset=train_dataset,
+                num_iterations=config.num_iterations,
+                num_epochs=config.num_epochs,
+                batch_size=config.batch_size,
+                body_learning_rate=config.body_learning_rate,
+                column_mapping={"text": "text", "label": "label"},
+            )
+        except TypeError:
+            # 新版本 SetFit 只暴露 Trainer + TrainingArguments
+            from setfit import Trainer
 
-        args = TrainingArguments(
-            batch_size=config.batch_size,
-            num_epochs=config.num_epochs,
-            body_learning_rate=config.body_learning_rate,
-            num_iterations=config.num_iterations,
-        )
-        trainer = Trainer(model=model, args=args, train_dataset=train_dataset)
+            args = TrainingArguments(
+                batch_size=config.batch_size,
+                num_epochs=config.num_epochs,
+                body_learning_rate=config.body_learning_rate,
+                num_iterations=config.num_iterations,
+            )
+            trainer = Trainer(model=model, args=args, train_dataset=train_dataset)
 
-    _attach_progress(trainer, progress_cb)
+        _attach_progress(trainer, progress_cb)
 
-    start = time.time()
-    if progress_cb:
-        progress_cb(0.15, f"开始训练 device={device} 样本={len(texts)}")
-    trainer.train()
+        start = time.time()
+        if progress_cb:
+            progress_cb(0.15, f"开始训练 device={device} 样本={len(texts)}")
+        trainer.train()
+    finally:
+        os.chdir(previous_cwd)
     elapsed = round(time.time() - start, 1)
     if progress_cb:
         progress_cb(0.98, f"训练完成，耗时 {elapsed}s")

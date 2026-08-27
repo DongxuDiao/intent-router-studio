@@ -84,8 +84,8 @@ cd frontend && npm install && npm run build && cd ..
 # API（托管 frontend/dist）
 cd backend && uvicorn app.main:app --host 127.0.0.1 --port 8000 &
 
-# Worker（独立进程；Mac 上自动用 MPS，Docker 内为 CPU）
-cd backend && python -m app.worker.main &
+# Worker（监督器 + 训练子进程；可将 SIGKILL/exit 137 标记为 WORKER_OOM）
+cd backend && python -m app.worker.supervisor &
 
 # 前端开发模式（热更新，代理 /api → 127.0.0.1:8000）
 cd frontend && npm run dev   # http://127.0.0.1:5173

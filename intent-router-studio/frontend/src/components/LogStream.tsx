@@ -11,6 +11,37 @@ export interface RunEventItem {
   created_at: string
 }
 
+type SseEnvelope = {
+  ts?: string
+  type?: string
+  payload?: Partial<RunEventItem> & { level?: string; message?: string; stage?: string; percent?: number; status?: string }
+  level?: string
+  message?: string
+  stage?: string
+  percent?: number
+  status?: string
+}
+
+/** 兼容后端当前的直接 payload 与旧的 {ts,type,payload} 包装格式。 */
+export function parseRunSseEvent(rawData: string, lastEventId: string, eventType = 'message', now = new Date().toISOString()): RunEventItem {
+  const envelope = JSON.parse(rawData) as SseEnvelope
+  const type = envelope.type ?? eventType
+  const p = (envelope.payload ?? envelope) as RunEventItem & { level?: string; message?: string; stage?: string; percent?: number; status?: string }
+  return {
+    sequence: Number(lastEventId) || 0,
+    stage: p.stage ?? null,
+    level: p.level ?? (type === 'metric' ? 'success' : 'info'),
+    message:
+      p.message ??
+      (type === 'terminal'
+        ? `终态：${p.status ?? ''}`
+        : type === 'metric'
+          ? `指标：${JSON.stringify(p).slice(0, 160)}`
+          : JSON.stringify(p).slice(0, 160)),
+    created_at: envelope.ts ?? now,
+  }
+}
+
 const LEVEL_COLOR: Record<string, string> = {
   info: 'default',
   warning: 'warning',
@@ -39,22 +70,7 @@ export function LogStream({ runId, active }: { runId: string; active: boolean })
     // 后端 SSE 事件带 event: 名称（log/progress/metric/terminal），需按类型监听
     const handle = (raw: MessageEvent) => {
       try {
-        const data = JSON.parse(raw.data) as { ts?: string; type?: string; payload?: Partial<RunEventItem> }
-        // 事件体为 {ts, type, payload} 包装；统一展开为展示结构
-        const p = (data.payload ?? {}) as RunEventItem & { level?: string; message?: string; stage?: string; percent?: number }
-        const item: RunEventItem = {
-          sequence: Number(raw.lastEventId) || 0,
-          stage: p.stage ?? null,
-          level: p.level ?? (data.type === 'metric' ? 'success' : 'info'),
-          message:
-            p.message ??
-            (data.type === 'terminal'
-              ? `终态：${(p as unknown as { status?: string }).status ?? ''}`
-              : data.type === 'metric'
-                ? `指标：${JSON.stringify(p).slice(0, 160)}`
-                : JSON.stringify(p).slice(0, 160)),
-          created_at: data.ts ?? new Date().toISOString(),
-        }
+        const item = parseRunSseEvent(raw.data, raw.lastEventId, raw.type)
         if (item.sequence <= lastSeqRef.current) return
         lastSeqRef.current = item.sequence
         setEvents((prev) => [...prev, item])

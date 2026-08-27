@@ -175,6 +175,14 @@ def test_validate_split_passes_on_good_split():
     assert validate_split(result.df) == []
 
 
+def test_split_with_missing_group_id_uses_normalized_hash_fallback():
+    """group_id 是可选列时，切分后置校验必须与切分算法使用同一哈希兜底。"""
+    df = _df(_rows_per_label({lab: [6, 6, 6] for lab in LABELS}))
+    df["group_id"] = None
+    result = group_split(df, seed=42)
+    assert validate_split(result.df) == []
+
+
 def test_validate_split_detects_problems():
     df = _df(_rows_per_label({lab: [6, 6, 6] for lab in LABELS}))
     result = group_split(df, seed=42)
