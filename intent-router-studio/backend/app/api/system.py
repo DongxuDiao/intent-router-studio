@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import platform
+import time
 
 import psutil
 from fastapi import APIRouter, Depends
@@ -69,19 +70,28 @@ def cleanup(payload: CleanupRequest, db: Session = Depends(get_db)) -> dict:
     if payload.target == "playground_history":
         removed = inference_service.clear_playground_history(db, payload.project_id)
         return {"removed": removed, "target": payload.target}
-    # uploads_tmp：清理未被任何导入引用的上传文件
+    # uploads_tmp：只清理超过安全存活时间的未引用文件。新建 .tmp-*
+    # 可能仍由流式上传持有，不得仅因数据库尚无 Upload 行就删除。
     from app.models import Upload
 
     settings = get_settings()
     referenced = {u.safe_path for u in db.query(Upload).all()}
     removed = 0
+    cutoff = time.time() - settings.cleanup_min_age_seconds
+
+    def old_enough(path) -> bool:
+        try:
+            return path.is_file() and path.stat().st_mtime <= cutoff
+        except FileNotFoundError:
+            return False
+
     for path in settings.uploads_dir.iterdir():
-        if path.is_file() and str(path) not in referenced:
+        if old_enough(path) and str(path) not in referenced:
             path.unlink(missing_ok=True)
             removed += 1
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)
     for path in settings.tmp_dir.iterdir():
-        if path.is_file():
+        if old_enough(path):
             path.unlink(missing_ok=True)
             removed += 1
     return {"removed": removed, "target": payload.target}

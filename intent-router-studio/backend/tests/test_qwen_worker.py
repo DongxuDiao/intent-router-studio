@@ -205,6 +205,7 @@ def test_rewriter_app_maps_busy_429_and_exposes_metrics():
 
 def test_rewriter_health_is_not_ready_until_model_loaded():
     from fastapi.testclient import TestClient
+
     from app.rewriter.main import build_rewriter_app
 
     p = _provider()

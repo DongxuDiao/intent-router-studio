@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     max_text_chars: int = 4_000
     max_batch_inference: int = 1_000
     max_batch_rewrite: int = 100  # 修改方案 §10.4：批量改写上限
+    cleanup_min_age_seconds: int = 3600  # 未引用临时文件至少保留 1h，避免误删正在上传的文件
 
     # XLSX 压缩炸弹防护（V2 §4.4）：解压后总大小 / sheet 数 / 首表行列上限
     max_xlsx_expand_mb: int = 500

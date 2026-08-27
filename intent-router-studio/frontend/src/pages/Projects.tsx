@@ -1,6 +1,6 @@
 /** 项目列表：创建 / 选择当前项目。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Empty, Form, Input, List, Modal, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Empty, Form, Input, List, Modal, Tag, Typography, message } from 'antd'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
@@ -8,9 +8,21 @@ import { PageHeader } from '../components/common'
 import { useProject } from '../store/project'
 import type { Project } from '../types'
 import { fmtTime } from '../utils/format'
+import { clearPlaygroundCache } from '../utils/playgroundCache'
+
+interface ProjectDeletionImpact {
+  project_id: string
+  project_name: string
+  is_empty: boolean
+  can_delete: boolean
+  counts: Record<string, number>
+  active_runs: { id: string; name: string; status: string }[]
+}
 
 export default function Projects() {
   const [open, setOpen] = useState(false)
+  const [deleting, setDeleting] = useState<{ project: Project; impact: ProjectDeletionImpact } | null>(null)
+  const [confirmName, setConfirmName] = useState('')
   const [form] = Form.useForm()
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -32,6 +44,37 @@ export default function Projects() {
       setProjectId(p.id)
     },
     onError: (e) => message.error(e instanceof Error ? e.message : '创建失败'),
+  })
+
+  const inspectDelete = useMutation({
+    mutationFn: (project: Project) =>
+      api<ProjectDeletionImpact>(`/projects/${project.id}/deletion-impact`),
+    onSuccess: (impact, project) => {
+      setConfirmName('')
+      setDeleting({ project, impact })
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : '无法获取删除影响范围'),
+  })
+
+  const remove = useMutation({
+    mutationFn: ({ project, confirmation }: { project: Project; confirmation?: string }) => {
+      const init: RequestInit = confirmation
+        ? { method: 'DELETE', body: JSON.stringify({ confirm_name: confirmation }) }
+        : { method: 'DELETE' }
+      return api<{ deleted: boolean; project_id: string; counts: Record<string, number> }>(
+        `/projects/${project.id}`,
+        init,
+      )
+    },
+    onSuccess: (_result, { project }) => {
+      clearPlaygroundCache(project.id)
+      if (projectId === project.id) setProjectId(null)
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      setDeleting(null)
+      setConfirmName('')
+      message.success(`项目 ${project.name} 及其关联内容已删除`)
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : '删除失败'),
   })
 
   return (
@@ -73,6 +116,15 @@ export default function Projects() {
                   >
                     进入
                   </Button>,
+                  <Button
+                    key="delete"
+                    danger
+                    size="small"
+                    loading={inspectDelete.isPending && inspectDelete.variables?.id === p.id}
+                    onClick={() => inspectDelete.mutate(p)}
+                  >
+                    删除
+                  </Button>,
                 ]}
               >
                 <List.Item.Meta
@@ -91,6 +143,64 @@ export default function Projects() {
           />
         )}
       </Card>
+
+      <Modal
+        title={deleting?.impact.is_empty ? '确认删除空项目' : '永久删除项目及全部数据'}
+        open={Boolean(deleting)}
+        okText="确认删除"
+        okButtonProps={{
+          danger: true,
+          disabled: Boolean(deleting && (!deleting.impact.can_delete || (!deleting.impact.is_empty && confirmName !== deleting.project.name))),
+        }}
+        cancelText="取消"
+        confirmLoading={remove.isPending}
+        onCancel={() => { setDeleting(null); setConfirmName('') }}
+        onOk={() => {
+          if (!deleting) return
+          remove.mutate({
+            project: deleting.project,
+            confirmation: deleting.impact.is_empty ? undefined : confirmName,
+          })
+        }}
+      >
+        {deleting && (
+          <div>
+            {!deleting.impact.can_delete ? (
+              <Alert
+                type="error"
+                showIcon
+                message="项目仍有排队中或运行中的训练"
+                description="请先取消训练并等待任务结束，再删除项目。"
+              />
+            ) : deleting.impact.is_empty ? (
+              <Alert type="warning" showIcon message="此操作不可撤销" description="将删除项目及其默认标签配置。" />
+            ) : (
+              <>
+                <Alert
+                  type="error"
+                  showIcon
+                  message="此操作将级联删除全部项目数据和本地制品，且不可恢复"
+                />
+                <Typography.Paragraph style={{ marginTop: 16, marginBottom: 8 }}>
+                  影响范围：{Object.entries(deleting.impact.counts)
+                    .filter(([, count]) => count > 0)
+                    .map(([name, count]) => `${name} ${count}`)
+                    .join('、')}
+                </Typography.Paragraph>
+                <Typography.Paragraph style={{ marginBottom: 8 }}>
+                  请输入项目名 <Typography.Text strong>{deleting.project.name}</Typography.Text> 确认：
+                </Typography.Paragraph>
+                <Input
+                  autoFocus
+                  value={confirmName}
+                  placeholder={deleting.project.name}
+                  onChange={(event) => setConfirmName(event.target.value)}
+                />
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         title="新建项目"

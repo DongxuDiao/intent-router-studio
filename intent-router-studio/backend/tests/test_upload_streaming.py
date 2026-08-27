@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import time
 
 import pandas as pd
 import pytest
 
 from app.config import get_settings
-from app.errors import ApiError
+from app.errors import ApiError, NotFoundError
 from app.services import dataset_service
 
 
@@ -101,6 +103,37 @@ def test_upload_api_streams_and_limits(db, client, project_id, env_limit):
     assert db.query(Upload).count() == before
     assert _no_temp_files()
 
+
+def test_upload_finalization_fails_cleanly_if_project_was_deleted(db, client):
+    project_id = client.post("/api/v1/projects", json={"name": "上传竞态项目"}).json()["id"]
+    existing_uploads = set(get_settings().uploads_dir.iterdir())
+    writer = dataset_service.StreamingUploadWriter(db, project_id, "race.csv", "text/csv")
+    writer.write(_csv_bytes(2))
+    assert client.delete(f"/api/v1/projects/{project_id}").status_code == 200
+
+    try:
+        with pytest.raises(NotFoundError):
+            writer.finish(db)
+    finally:
+        writer.abort()
+
+    assert _no_temp_files()
+    assert set(get_settings().uploads_dir.iterdir()) == existing_uploads
+
+
+def test_cleanup_preserves_recent_upload_temp_and_removes_old_one(client):
+    path = get_settings().uploads_dir / ".tmp-active.csv"
+    path.write_bytes(b"streaming")
+
+    first = client.post("/api/v1/system/cleanup", json={"target": "uploads_tmp"})
+    assert first.status_code == 200
+    assert path.exists()
+
+    old = time.time() - get_settings().cleanup_min_age_seconds - 10
+    os.utime(path, (old, old))
+    second = client.post("/api/v1/system/cleanup", json={"target": "uploads_tmp"})
+    assert second.status_code == 200
+    assert not path.exists()
 
 def test_request_body_limit_middleware_rejects_before_read(db, client, project_id, env_limit):
     """声明超大的 Content-Length：读 body 前即 413。"""

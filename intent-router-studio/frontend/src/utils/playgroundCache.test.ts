@@ -1,8 +1,19 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { patchPlaygroundCache, patchRewriteCache, playgroundCacheKey, readPlaygroundCache } from './playgroundCache'
+import {
+  clearAllPlaygroundCaches,
+  clearPlaygroundCache,
+  patchPlaygroundCache,
+  patchRewriteCache,
+  playgroundCacheKey,
+  readPlaygroundCache,
+  setPlaygroundCacheEnabled,
+} from './playgroundCache'
 
 describe('Playground local cache', () => {
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => {
+    localStorage.clear()
+    setPlaygroundCacheEnabled(true)
+  })
 
   it('isolates snapshots by project and merges patches', () => {
     patchPlaygroundCache('p1', { text: 'query-1', tab: 'single' })
@@ -22,8 +33,32 @@ describe('Playground local cache', () => {
 
   it('ignores malformed and incompatible cache', () => {
     localStorage.setItem(playgroundCacheKey('bad'), '{')
-    localStorage.setItem(playgroundCacheKey('old'), JSON.stringify({ version: 0, text: 'old' }))
+    localStorage.setItem(playgroundCacheKey('old'), JSON.stringify({ version: 1, text: 'old' }))
     expect(readPlaygroundCache('bad')).toBeNull()
     expect(readPlaygroundCache('old')).toBeNull()
+  })
+
+  it('expires snapshots after 24 hours and supports an explicit opt-out', () => {
+    localStorage.setItem(playgroundCacheKey('expired'), JSON.stringify({
+      version: 2, expiresAt: Date.now() - 1, text: 'sensitive',
+    }))
+    expect(readPlaygroundCache('expired')).toBeNull()
+    expect(localStorage.getItem(playgroundCacheKey('expired'))).toBeNull()
+
+    patchPlaygroundCache('p2', { text: 'clear-on-opt-out' })
+    setPlaygroundCacheEnabled(false)
+    clearAllPlaygroundCaches()
+    expect(localStorage.getItem(playgroundCacheKey('p2'))).toBeNull()
+    patchPlaygroundCache('p1', { text: 'do-not-store' })
+    expect(readPlaygroundCache('p1')).toBeNull()
+    expect(localStorage.getItem(playgroundCacheKey('p1'))).toBeNull()
+  })
+
+  it('clears only the deleted project snapshot', () => {
+    patchPlaygroundCache('p1', { text: 'remove-me' })
+    patchPlaygroundCache('p2', { text: 'keep-me' })
+    clearPlaygroundCache('p1')
+    expect(readPlaygroundCache('p1')).toBeNull()
+    expect(readPlaygroundCache('p2')?.text).toBe('keep-me')
   })
 })

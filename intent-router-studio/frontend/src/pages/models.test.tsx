@@ -24,6 +24,8 @@ afterEach(cleanup) // vitest 未开 globals，RTL 不会自动卸载组件
 
 beforeEach(() => {
   localStorage.clear()
+  const getComputedStyle = window.getComputedStyle.bind(window)
+  window.getComputedStyle = vi.fn((element: Element) => getComputedStyle(element))
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,
     media: query,
@@ -147,5 +149,86 @@ describe('项目进入修复（V2 §4.5）', () => {
     // 先 setProjectId（localStorage 即刻更新）再导航
     expect(localStorage.getItem('irs.projectId')).toBe('proj-2')
     expect(await screen.findByText('OVERVIEW_MARKER')).toBeVisible()
+  })
+
+  it('空项目经确认后删除，并清空当前项目与 Playground 缓存', async () => {
+    const Projects = (await import('./Projects')).default
+    const emptyProject: Project = {
+      id: 'proj-empty', name: '空项目', description: '', active_model_id: null,
+      active_model_name: null, dataset_count: 0, run_count: 0, created_at: '2026-01-01T00:00:00',
+    }
+    mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/projects' && !init) return { items: [emptyProject] }
+      if (path === '/projects/proj-empty/deletion-impact') {
+        return {
+          project_id: 'proj-empty', project_name: '空项目', is_empty: true, can_delete: true,
+          counts: {}, active_runs: [],
+        }
+      }
+      if (path === '/projects/proj-empty' && init?.method === 'DELETE') {
+        return { deleted: true, project_id: 'proj-empty' }
+      }
+      return {}
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    localStorage.setItem('irs.projectId', 'proj-empty')
+    localStorage.setItem('irs.playground.v1.proj-empty', JSON.stringify({ version: 1, text: 'cached' }))
+    render(
+      <QueryClientProvider client={client}>
+        <ProjectProvider>
+          <MemoryRouter><Projects /></MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /^删\s*除$/ }))
+    expect(await screen.findByText('确认删除空项目')).toBeInTheDocument()
+    const footer = document.querySelector('.ant-modal-footer')
+    expect(footer).not.toBeNull()
+    fireEvent.click(within(footer as HTMLElement).getByRole('button', { name: '确认删除' }))
+
+    await waitFor(() => expect(mockedApi).toHaveBeenCalledWith('/projects/proj-empty', { method: 'DELETE' }))
+    expect(localStorage.getItem('irs.projectId')).toBeNull()
+    expect(localStorage.getItem('irs.playground.v1.proj-empty')).toBeNull()
+  })
+
+  it('非空项目必须输入完整项目名后才可级联删除', async () => {
+    const Projects = (await import('./Projects')).default
+    const project: Project = {
+      id: 'proj-data', name: '有数据项目', description: '', active_model_id: null,
+      active_model_name: null, dataset_count: 1, run_count: 2, created_at: '2026-01-01T00:00:00',
+    }
+    mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/projects' && !init) return { items: [project] }
+      if (path === '/projects/proj-data/deletion-impact') {
+        return {
+          project_id: 'proj-data', project_name: '有数据项目', is_empty: false, can_delete: true,
+          counts: { datasets: 1, runs: 2, uploads: 1 }, active_runs: [],
+        }
+      }
+      if (path === '/projects/proj-data' && init?.method === 'DELETE') {
+        return { deleted: true, project_id: 'proj-data', counts: { datasets: 1, runs: 2, uploads: 1 } }
+      }
+      return {}
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <ProjectProvider><MemoryRouter><Projects /></MemoryRouter></ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /^删\s*除$/ }))
+    expect(await screen.findByText('永久删除项目及全部数据')).toBeInTheDocument()
+    const confirmButton = screen.getByRole('button', { name: '确认删除' })
+    expect(confirmButton).toBeDisabled()
+    fireEvent.change(screen.getByPlaceholderText('有数据项目'), { target: { value: '有数据项目' } })
+    expect(confirmButton).not.toBeDisabled()
+    fireEvent.click(confirmButton)
+
+    await waitFor(() => expect(mockedApi).toHaveBeenCalledWith(
+      '/projects/proj-data',
+      { method: 'DELETE', body: JSON.stringify({ confirm_name: '有数据项目' }) },
+    ))
   })
 })

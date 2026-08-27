@@ -72,8 +72,7 @@ def _generation_worker_main(  # 按子进程入口签名传递
     """
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        from transformers import StoppingCriteria, StoppingCriteriaList
+        from transformers import AutoModelForCausalLM, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
         # 混合大小核 CPU（如 Apple P/E core）上，线程数超过性能核数会
         # 显著拖慢生成（实测 8 线程 ~0.6 tok/s → 4 线程 ~2.5 tok/s）

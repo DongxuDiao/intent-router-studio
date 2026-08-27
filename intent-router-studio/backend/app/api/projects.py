@@ -1,12 +1,12 @@
 """项目与标签接口（设计文档 9.2）。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import DatasetVersion, ModelVersion, Project, TrainingRun
-from app.schemas import ProjectCreate, ProjectPatch
+from app.schemas import ProjectCreate, ProjectDeleteRequest, ProjectPatch
 from app.services import project_service
 
 router = APIRouter(tags=["projects"])
@@ -54,6 +54,20 @@ def patch_project(project_id: str, payload: ProjectPatch, db: Session = Depends(
         project.description = payload.description
     db.commit()
     return project_to_dict(project, db)
+
+
+@router.get("/projects/{project_id}/deletion-impact")
+def get_project_deletion_impact(project_id: str, db: Session = Depends(get_db)) -> dict:
+    return project_service.project_deletion_impact(db, project_id)
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(
+    project_id: str,
+    payload: ProjectDeleteRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return project_service.delete_project(db, project_id, payload.confirm_name if payload else None)
 
 
 @router.get("/projects/{project_id}/label-schema")

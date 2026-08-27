@@ -18,6 +18,10 @@ class ProjectPatch(BaseModel):
     description: str | None = None
 
 
+class ProjectDeleteRequest(BaseModel):
+    confirm_name: str | None = Field(default=None, max_length=200)
+
+
 class ImportConfig(BaseModel):
     mode: Literal["prelabeled", "unlabeled", "single_label"] = "prelabeled"
     columns: dict[str, str | None] = Field(default_factory=dict)

@@ -192,6 +192,15 @@ class InferenceRuntime:
             self._runtimes.pop(project_id, None)
         self.cache.clear()
 
+    def evict_project(self, project_id: str, model_version_ids: list[str] | None = None) -> None:
+        """删除项目时同时驱逐默认运行时、显式版本 LRU 和预测缓存。"""
+        with self._guard:
+            self._runtimes.pop(project_id, None)
+            for model_id in model_version_ids or []:
+                self._versions.pop(model_id, None)
+            self._locks.pop(project_id, None)
+        self.cache.clear()
+
     # ---- 显式指定版本（Playground / A-B 对比），小容量 LRU ----
     def get_version(self, model_version_id: str) -> ModelRuntime | None:
         with self._guard:

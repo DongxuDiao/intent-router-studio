@@ -9,7 +9,15 @@ import { useProject } from '../store/project'
 import { EFFECT_CEILING_NAMES, GATE_NAMES, LABELS, LABEL_NAMES } from '../types'
 import type { ModelVersion, PredictResult } from '../types'
 import { fmtMs, fmtTime } from '../utils/format'
-import { patchPlaygroundCache, readPlaygroundCache, type PlaygroundTab } from '../utils/playgroundCache'
+import {
+  clearAllPlaygroundCaches,
+  clearPlaygroundCache,
+  isPlaygroundCacheEnabled,
+  patchPlaygroundCache,
+  readPlaygroundCache,
+  setPlaygroundCacheEnabled,
+  type PlaygroundTab,
+} from '../utils/playgroundCache'
 
 function ResultPanel({ title, r }: { title: string; r: PredictResult | null }) {
   if (!r) return <Card title={title} size="small"><Typography.Text type="secondary">待推理</Typography.Text></Card>
@@ -57,6 +65,7 @@ export default function Playground() {
   const [debug, setDebug] = useState(initial?.debug ?? false)
   const [batchText, setBatchText] = useState(initial?.batchText ?? '查看今天的日程\n删除所有已完成任务\n这个…那个…算了\n今天天气怎么样')
   const [modelB, setModelB] = useState<string | null>(initial?.modelB ?? null)
+  const [cacheEnabled, setCacheEnabled] = useState(isPlaygroundCacheEnabled)
   const [lastPredict, setLastPredict] = useState<PredictResult | null>(initial?.singleResult ?? null)
   const [lastBatch, setLastBatch] = useState<{ count: number; results: PredictResult[] } | null>(initial?.batchResult ?? null)
   const [lastCompare, setLastCompare] = useState<{ a: PredictResult; b: PredictResult } | null>(initial?.compareResult ?? null)
@@ -154,15 +163,35 @@ export default function Playground() {
   }, [projectId])
 
   if (!projectId) return <Alert type="info" showIcon message="请先选择项目" />
+  const cacheControls = (
+    <Space>
+      <Typography.Text type="secondary">浏览器缓存输入/结果 24h</Typography.Text>
+      <Switch
+        size="small"
+        checked={cacheEnabled}
+        onChange={(enabled) => {
+          setCacheEnabled(enabled)
+          setPlaygroundCacheEnabled(enabled)
+          if (!enabled) clearAllPlaygroundCaches()
+        }}
+      />
+      <Button size="small" onClick={() => { clearPlaygroundCache(projectId); message.success('当前项目 Playground 缓存已清空') }}>
+        清空缓存
+      </Button>
+    </Space>
+  )
   const activeModel = models.data?.items.find((m) => m.status === 'ACTIVE')
   if (!activeModel) {
     return (
-      <Alert
-        type="warning"
-        showIcon
-        message="尚无激活模型"
-        description="Playground 依赖激活模型。请先完成一次训练 → 注册 → 激活。"
-      />
+      <div>
+        <PageHeader title="Playground" subTitle="当前项目尚无激活模型" extra={cacheControls} />
+        <Alert
+          type="warning"
+          showIcon
+          message="尚无激活模型"
+          description="Playground 依赖激活模型。请先完成一次训练 → 注册 → 激活。"
+        />
+      </div>
     )
   }
 
@@ -171,6 +200,7 @@ export default function Playground() {
       <PageHeader
         title="Playground"
         subTitle={`激活模型 ${activeModel.name} · 单条推理带缓存与原因码；批量逐行；A/B 对比；Query 理解含改写双路评估`}
+        extra={cacheControls}
       />
       <Segmented
         options={[
@@ -212,7 +242,7 @@ export default function Playground() {
                       ))}
                     </select>
                     <span>
-                      <Switch size="small" checked={saveText} onChange={(v) => { setSaveText(v); patchPlaygroundCache(projectId, { saveText: v }) }} /> <Typography.Text type="secondary">保存原文（默认只存哈希）</Typography.Text>
+                      <Switch size="small" checked={saveText} onChange={(v) => { setSaveText(v); patchPlaygroundCache(projectId, { saveText: v }) }} /> <Typography.Text type="secondary">案例入库保存原文（默认只存哈希）</Typography.Text>
                     </span>
                     <Button
                       size="small"

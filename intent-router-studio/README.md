@@ -167,6 +167,8 @@ SKIP_E2E=1 ./scripts/ci.sh          # 无本地栈时跳过 E2E
 
 ```
 POST /api/v1/projects                                 创建项目（自动带 5 分类 schema）
+GET  /api/v1/projects/{id}/deletion-impact           预览项目级联删除影响范围
+DELETE /api/v1/projects/{id}                          删除项目；非空项目用 JSON {"confirm_name":"..."} 确认
 POST /api/v1/projects/{id}/uploads                    上传 CSV/JSONL/XLSX/TXT
 GET  /api/v1/uploads/{id}/preview                     服务端解码预览 + 列名建议
 POST /api/v1/uploads/{id}/import                      列映射/标签映射导入（prelabeled/unlabeled/single_label）

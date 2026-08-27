@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import ids
@@ -72,6 +73,8 @@ class StreamingUploadWriter:
         self._limit = self._settings.max_upload_mb * 1024 * 1024
         self._settings.uploads_dir.mkdir(parents=True, exist_ok=True)
         self._tmp_path = self._settings.uploads_dir / f".tmp-{ids.prefixed(ids.UPLOAD)}.{ext}"
+        self._final_path: Path | None = None
+        self._committed = False
         self._fh = open(self._tmp_path, "wb")
         self._hasher = hashlib.sha256()
         self._size = 0
@@ -88,23 +91,40 @@ class StreamingUploadWriter:
         self._hasher.update(chunk)
 
     def finish(self, db: Session) -> Upload:
-        upload_id = ids.prefixed(ids.UPLOAD)
-        final_path = self._settings.uploads_dir / f"{upload_id}.{self._ext}"
         self._fh.close()
-        os.replace(self._tmp_path, final_path)
-        upload = Upload(
-            id=upload_id,
-            project_id=self._project_id,
-            original_name=self._original_name[:500],
-            safe_path=str(final_path),
-            sha256=self._hasher.hexdigest(),
-            size_bytes=self._size,
-            content_type=self._content_type,
-            status="PENDING",
-        )
-        db.add(upload)
-        db.commit()
-        return upload
+        from app.services import run_service
+
+        # __init__ 的项目存在性检查已经开启读事务；进入删除共享锁前先释放快照，
+        # 再用 SQLite 写锁重新检查，避免长上传期间项目已被级联删除。
+        db.rollback()
+        with run_service.project_lifecycle_lock(self._project_id):
+            db.execute(text("BEGIN IMMEDIATE"))
+            if db.get(Project, self._project_id) is None:
+                db.rollback()
+                raise NotFoundError("Project", self._project_id)
+            upload_id = ids.prefixed(ids.UPLOAD)
+            final_path = self._settings.uploads_dir / f"{upload_id}.{self._ext}"
+            self._final_path = final_path
+            try:
+                os.replace(self._tmp_path, final_path)
+                upload = Upload(
+                    id=upload_id,
+                    project_id=self._project_id,
+                    original_name=self._original_name[:500],
+                    safe_path=str(final_path),
+                    sha256=self._hasher.hexdigest(),
+                    size_bytes=self._size,
+                    content_type=self._content_type,
+                    status="PENDING",
+                )
+                db.add(upload)
+                db.commit()
+            except Exception:
+                db.rollback()
+                final_path.unlink(missing_ok=True)
+                raise
+            self._committed = True
+            return upload
 
     def abort(self) -> None:
         self._aborted = True
@@ -113,6 +133,8 @@ class StreamingUploadWriter:
                 self._fh.close()
         finally:
             self._tmp_path.unlink(missing_ok=True)
+            if not self._committed and self._final_path is not None:
+                self._final_path.unlink(missing_ok=True)
 
 
 def save_upload(db: Session, project_id: str, original_name: str, content: bytes, content_type: str | None) -> Upload:

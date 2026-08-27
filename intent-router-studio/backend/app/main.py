@@ -66,6 +66,15 @@ def create_app() -> FastAPI:
         os.environ["HF_HOME"] = str(settings.hf_home_path)
         os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
         init_db()
+        from app.services import project_service
+
+        db = SessionLocal()
+        try:
+            recovery = project_service.recover_staged_project_deletions(db)
+            if any(recovery.values()):
+                logger.warning("项目删除恢复完成 result=%s", recovery)
+        finally:
+            db.close()
         _startup_load_active_models()
         logger.info("API 启动完成 artifact_root=%s", settings.artifact_root_path.name)
         yield
