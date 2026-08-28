@@ -2,7 +2,7 @@
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
-import { QueryRewritePanel, RewriteDiff, RewriteSafetyChecks } from './rewrite'
+import { ProviderTraceCard, QueryRewritePanel, RewriteDiff, RewriteSafetyChecks } from './rewrite'
 import type { QueryUnderstanding } from '../types'
 
 function renderWithProviders(ui: React.ReactElement) {
@@ -101,5 +101,55 @@ describe('QueryRewritePanel', () => {
     expect(screen.getByPlaceholderText(/用户 query/)).toBeTruthy()
     expect(screen.getByText('跟随项目配置')).toBeTruthy() // Select 当前值直接渲染在 DOM
     expect(screen.getByRole('button', { name: '理解 Query' })).toBeTruthy()
+  })
+})
+
+
+describe('ProviderTraceCard（外部模型 V1 §9.4）', () => {
+  it('展示连接 / 模型 / 延迟 / token / 请求 ID 与缓存命中', () => {
+    renderWithProviders(
+      <ProviderTraceCard
+        u={fixture({
+          cache_hit: true,
+          provider_trace: {
+            connection_id: 'rpc_glm0000000000000000',
+            connection_revision: 3,
+            provider: 'glm',
+            model_id: 'glm-5.2',
+            provider_request_id: 'glmr-abc',
+            provider_latency_ms: 812.34,
+            usage: { prompt_tokens: 210, completion_tokens: 24, total_tokens: 234 },
+          },
+        })}
+      />,
+    )
+    expect(screen.getByText('rpc_glm0000000000000000')).toBeTruthy()
+    expect(screen.getByText('rev 3')).toBeTruthy()
+    expect(screen.getByText('glm / glm-5.2')).toBeTruthy()
+    expect(screen.getByText('provider 812ms')).toBeTruthy()
+    expect(screen.getByText('tokens 234（生成 24）')).toBeTruthy()
+    expect(screen.getByText('glmr-abc')).toBeTruthy()
+    expect(screen.getByText(/缓存命中/)).toBeTruthy()
+  })
+
+  it('降级时展示 fallback 原因；内置连接显示本地 Qwen', () => {
+    renderWithProviders(
+      <ProviderTraceCard
+        u={fixture({
+          fallback_reason: 'PROVIDER_AUTH_FAILED',
+          provider_trace: {
+            connection_id: 'builtin:local_qwen',
+            connection_revision: null,
+            provider: 'local_qwen',
+            model_id: null,
+            provider_request_id: null,
+            provider_latency_ms: 41.2,
+            usage: null,
+          },
+        })}
+      />,
+    )
+    expect(screen.getByText('本地 Qwen')).toBeTruthy()
+    expect(screen.getByText(/降级 PROVIDER_AUTH_FAILED/)).toBeTruthy()
   })
 })

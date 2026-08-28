@@ -130,6 +130,51 @@ function decisionMeta(u: QueryUnderstanding): { color: string; text: string } {
 }
 
 /** Playground「Query 理解」面板：输入 → 双路路由 + 三 Query + 安全门 + 反馈。 */
+/** 外部模型 V1 §9.4：Provider 调用 Trace（只含元信息，不含密钥/原文/完整错误体） */
+export function ProviderTraceCard({ u }: { u: QueryUnderstanding }) {
+  const t = u.provider_trace
+  if (!t) return null
+  return (
+    <Card title="Provider Trace（改写模型调用；不含密钥与原文）" size="small">
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Typography.Text type="secondary" style={{ width: 120, fontSize: 12 }}>连接</Typography.Text>
+          <Typography.Text code style={{ fontSize: 11 }}>
+            {t.connection_id === 'builtin:local_qwen' ? '本地 Qwen' : t.connection_id ?? '-'}
+          </Typography.Text>
+          {t.connection_revision != null && <Tag style={{ fontSize: 11 }}>rev {t.connection_revision}</Tag>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Typography.Text type="secondary" style={{ width: 120, fontSize: 12 }}>模型</Typography.Text>
+          <Typography.Text style={{ fontSize: 12 }}>
+            {t.provider ?? '-'} / {t.model_id ?? '-'}
+          </Typography.Text>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Typography.Text type="secondary" style={{ width: 120, fontSize: 12 }}>调用</Typography.Text>
+          <Tag style={{ fontSize: 11 }}>
+            provider {t.provider_latency_ms != null ? `${Math.round(t.provider_latency_ms)}ms` : '-'}
+          </Tag>
+          {t.usage?.total_tokens != null && (
+            <Tag style={{ fontSize: 11 }}>
+              tokens {t.usage.total_tokens}
+              {t.usage.completion_tokens != null ? `（生成 ${t.usage.completion_tokens}）` : ''}
+            </Tag>
+          )}
+          {u.fallback_reason && <Tag color="orange" style={{ fontSize: 11 }}>降级 {u.fallback_reason}</Tag>}
+          {u.cache_hit && <Tag color="blue" style={{ fontSize: 11 }}>缓存命中（无实际调用）</Tag>}
+        </div>
+        {t.provider_request_id && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Typography.Text type="secondary" style={{ width: 120, fontSize: 12 }}>请求 ID</Typography.Text>
+            <Typography.Text code style={{ fontSize: 11 }}>{t.provider_request_id}</Typography.Text>
+          </div>
+        )}
+      </Space>
+    </Card>
+  )
+}
+
 export function QueryRewritePanel({ projectId }: { projectId: string }) {
   const initial = readPlaygroundCache(projectId)?.rewrite
   const [text, setText] = useState(initial?.text ?? '这个怎么停？')
@@ -287,6 +332,8 @@ export function QueryRewritePanel({ projectId }: { projectId: string }) {
               </div>
             </Space>
           </Card>
+
+          {u.provider_trace && <ProviderTraceCard u={u} />}
 
           <Card title="Rewrite Safety Gate（八项检查）" size="small">
             <RewriteSafetyChecks u={u} />

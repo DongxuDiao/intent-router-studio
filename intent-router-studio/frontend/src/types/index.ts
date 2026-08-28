@@ -481,6 +481,7 @@ export interface QueryUnderstanding {
   fallback_reason: string | null
   final_route: string
   cache_hit?: boolean
+  provider_trace?: ProviderTrace | null
 }
 
 export interface RewriteOptionsInput {
@@ -496,6 +497,8 @@ export interface RewriteConfigPayload {
   require_route_consistency: boolean
   fallback: string
   store_raw_text: boolean
+  /** 外部模型 V1 §6.2：项目选择的改写模型连接（版本化，可回滚） */
+  provider_connection_id?: string
 }
 
 /** V2 §4.3 方案A：生成模型参数由部署环境管理（rewriter REWRITE_* 环境变量），项目级只读 */
@@ -509,9 +512,78 @@ export interface RewriteDeploymentInfo {
   note: string
 }
 
+/** 外部模型 V1：改写模型连接（密钥只写不读，接口永不回传） */
+export interface ProviderConnection {
+  id: string
+  name: string
+  provider_type: 'local_qwen' | 'glm' | 'openai_compatible' | string
+  base_url?: string | null
+  model_id: string | null
+  api_key_hint?: string
+  has_api_key?: boolean
+  generation_config?: {
+    temperature?: number
+    max_tokens?: number
+    thinking?: boolean
+    json_mode?: boolean
+  } & Record<string, unknown>
+  revision?: number
+  enabled: boolean
+  egress_acknowledged?: boolean
+  last_test_status?: 'SUCCESS' | 'FAILED' | null
+  last_test_error_code?: string | null
+  last_test_latency_ms?: number | null
+  last_tested_at?: string | null
+  in_use_by_projects?: number
+  builtin: boolean
+  available?: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ProviderConnectionListResponse {
+  items: ProviderConnection[]
+}
+
+export interface ProviderConnectionTestResult {
+  status: 'SUCCESS' | 'FAILED'
+  latency_ms?: number
+  error_code?: string
+  message?: string
+  provider?: string
+  model_id?: string
+  provider_request_id?: string
+  standalone_query?: string
+}
+
+/** 当前项目生效的模型连接（GET /rewrite-config 的 selected_provider） */
+export interface SelectedProvider {
+  id: string
+  name: string
+  provider_type: string
+  model_id: string | null
+  revision: number | null
+  builtin: boolean
+  enabled: boolean
+  available: boolean
+  last_test_status: string | null
+}
+
+/** Provider 观测元信息（V1 §9.4 Playground Trace；不含密钥/原文） */
+export interface ProviderTrace {
+  connection_id: string | null
+  connection_revision: number | null
+  provider: string | null
+  model_id: string | null
+  provider_request_id: string | null
+  provider_latency_ms: number | null
+  usage: { prompt_tokens?: number | null; completion_tokens?: number | null; total_tokens?: number | null } | null
+}
+
 export interface RewriteConfigResponse {
   active: { id: string; config: RewriteConfigPayload }
   defaults: RewriteConfigPayload
+  selected_provider?: SelectedProvider
   deployment?: RewriteDeploymentInfo
   versions: { id: string; version: number; config: RewriteConfigPayload; hash: string; status: string; created_at: string }[]
 }
@@ -540,13 +612,26 @@ export interface RewriteFeedbackItem {
   created_at: string
 }
 
-export interface RewriteHealth {
-  base_url: string
-  breaker_state: 'closed' | 'open' | 'half-open'
+/** 外部模型 V1 §8.2：熔断按连接隔离 */
+export interface ConnectionBreakerSummary {
+  state: 'closed' | 'open' | 'half-open' | 'unhealthy' | 'rate_limited'
   consecutive_failures: number
   total_calls: number
   total_failures: number
   last_error: string | null
+  unhealthy_code: string | null
+  rate_limited: boolean
+}
+
+export interface RewriteHealth {
+  base_url: string
+  /** 兼容旧字段；新代码读取 connections */
+  breaker_state?: 'closed' | 'open' | 'half-open'
+  connections?: Record<string, ConnectionBreakerSummary>
+  consecutive_failures?: number
+  total_calls?: number
+  total_failures?: number
+  last_error?: string | null
   rewriter?: { ok?: boolean; [key: string]: unknown }
   metrics: {
     requests_total: number
