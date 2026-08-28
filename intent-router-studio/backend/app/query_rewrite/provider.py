@@ -18,13 +18,58 @@ from app.query_rewrite.schemas import ProviderOutput
 class ProviderUnavailable(Exception):
     """Provider 不可用 / 熔断打开。"""
 
+    # 远程 Provider 错误子类填充：降级原因码（透出到 fallback_reason）与重试语义
+    fallback_code = "PROVIDER_UNAVAILABLE"
+    retryable = False
+    persistent = False  # 持久错误（鉴权/欠费）：连接应标记 unhealthy 直到修复
+    retry_after_s: float | None = None
+
 
 class ProviderTimeout(Exception):
     """生成超时。"""
 
+    fallback_code = "TIMEOUT"
+
 
 class ProviderBusy(Exception):
     """生成队列已满（V2 §3.3 有界准入拒绝）：调用方应立即回退原文，不应等待。"""
+
+    fallback_code = "REWRITER_BUSY"
+
+
+class ProviderBadRequest(ProviderUnavailable):
+    """请求不合法（400 / 模型参数错误 / 业务码 1210~1215 等）：不重试。"""
+
+    fallback_code = "PROVIDER_INVALID_REQUEST"
+
+
+class ProviderAuthError(ProviderUnavailable):
+    """鉴权失败（401/403 / 1000~1003 / 1220）：持久错误，连接标记异常。"""
+
+    fallback_code = "PROVIDER_AUTH_FAILED"
+    persistent = True
+
+
+class ProviderRateLimited(ProviderUnavailable):
+    """速率限制（429 / 1302 / 1305）：可重试一次，不计入故障熔断。"""
+
+    fallback_code = "PROVIDER_RATE_LIMITED"
+    retryable = True
+
+
+class ProviderQuotaExceeded(ProviderUnavailable):
+    """欠费 / 额度耗尽：持久错误，不重试。"""
+
+    fallback_code = "PROVIDER_QUOTA_EXCEEDED"
+    persistent = True
+
+
+class ProviderUsage(BaseModel):
+    """远程模型 token 用量（只进聚合指标，不落原文）。"""
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 class ProviderReply(BaseModel):
@@ -35,6 +80,11 @@ class ProviderReply(BaseModel):
     provider: str
     model_id: str
     prompt_version: str
+    # 外部 Provider V1：连接与观测元信息（本地 Qwen / stub 不填）
+    request_id: str | None = None
+    usage: ProviderUsage | None = None
+    connection_id: str | None = None
+    connection_revision: int | None = None
 
 
 @runtime_checkable
