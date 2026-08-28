@@ -48,12 +48,16 @@ REWRITE_CONFIG_DEFAULTS: dict[str, Any] = {
     "require_route_consistency": True,
     "fallback": "original",
     "store_raw_text": False,
+    # 外部模型 V1 §6.2：默认本地 Qwen，现有项目行为不变；
+    # 该字段随配置版本化（可回滚），密钥/URL/模型参数仍在连接表中
+    "provider_connection_id": "builtin:local_qwen",
 }
 
 # V2 §4.3 方案A：生成模型参数（provider/model/device/生成上限）只由部署环境管理
 # ——即 rewriter 服务的 REWRITE_* 环境变量。项目级配置仅保留策略字段；
 # 这些键出现在项目配置中会被拒绝，避免"保存后不生效"的假配置。
-DEPLOYMENT_OWNED_KEYS = ("provider", "model_id", "device", "max_new_tokens", "max_context_chars", "base_url")
+# 外部模型 V1 §6.2 追加 api_key：密钥只能进连接表（加密），永不进项目配置。
+DEPLOYMENT_OWNED_KEYS = ("provider", "model_id", "device", "max_new_tokens", "max_context_chars", "base_url", "api_key")
 
 VALID_MODES = ("off", "normalize_only", "shadow", "safe_apply")
 
@@ -94,6 +98,17 @@ def get_client() -> RewriteClient:
             failure_threshold=settings.rewrite_failure_threshold,
             open_seconds=settings.rewrite_breaker_open_seconds,
         )
+        # 外部模型 V1 §8.2：连接更新 / 删除 / 测试成功 → 清除该连接熔断状态
+        from app.services import provider_connection_service
+
+        def _on_connection_change(event: str, row) -> None:
+            client = _client
+            if client is None or row is None:
+                return
+            if event in ("changed", "test_ok"):
+                client.clear_connection_state(getattr(row, "id", None))
+
+        provider_connection_service.register_listener(_on_connection_change)
     return _client
 
 
@@ -159,6 +174,9 @@ def validate_rewrite_config(config: dict[str, Any]) -> list[str]:
         problems.append("require_route_consistency 必须是布尔")
     if not isinstance(merged.get("store_raw_text", False), bool):
         problems.append("store_raw_text 必须是布尔")
+    connection_id = merged.get("provider_connection_id")
+    if connection_id is not None and (not isinstance(connection_id, str) or not connection_id.strip()):
+        problems.append("provider_connection_id 必须是非空字符串（builtin:local_qwen 或连接 ID）")
     return problems
 
 
@@ -190,12 +208,17 @@ def get_project_rewrite_config(db: Session, project_id: str) -> dict[str, Any]:
             config.update(version.config or {})
             config_version_id = version.id
     config = {k: v for k, v in config.items() if k not in DEPLOYMENT_OWNED_KEYS}
+    config.setdefault("provider_connection_id", "builtin:local_qwen")  # 旧配置读取时补默认（V1 §16.1）
+    from app.services import provider_connection_service
+
+    provider = provider_connection_service.connection_snapshot(db, config["provider_connection_id"])
     terminology_version_id, terms = _active_terminology(db, project_id)
     return {
         "config": config,
         "config_version_id": config_version_id,
         "terminology_version_id": terminology_version_id,
         "terms": terms,
+        "provider": provider,
     }
 
 
@@ -222,6 +245,12 @@ def put_rewrite_config(db: Session, project_id: str, config: dict[str, Any]) -> 
     problems = validate_rewrite_config(config)
     if problems:
         raise ApiError("VALIDATION_ERROR", "改写配置不合法", 422, {"problems": problems})
+    # 外部模型 V1 §6.2：连接引用合法且可用才允许保存（密钥/URL 仍禁止进入配置）
+    from app.services import provider_connection_service
+
+    provider_connection_service.validate_connection_for_config(
+        db, (config or {}).get("provider_connection_id") or "builtin:local_qwen"
+    )
     last = (
         db.query(RewriteConfigVersion)
         .filter(RewriteConfigVersion.project_id == project_id)
@@ -464,6 +493,8 @@ def understand_query(
 
     # ---- shadow / safe_apply：L0 之后进入生成式改写（缓存 → provider） ----
     client = get_client()
+    provider_spec = spec["provider"]
+    connection_id = provider_spec["id"]
     cache_key = build_cache_key(
         project_id,
         spec["config_version_id"],
@@ -471,6 +502,10 @@ def understand_query(
         PROMPT_VERSION,
         normalized,
         context,
+        provider_connection_id=connection_id,
+        provider_connection_revision=provider_spec.get("revision"),
+        model_id=provider_spec.get("model_id"),
+        generation_config_hash=provider_spec.get("generation_config_hash"),
     )
     cached = CACHE.get(cache_key)
     if cached is not None:
@@ -493,6 +528,7 @@ def understand_query(
     out = _fast_context_rewrite(term_result.text, context)
     if out is not None:
         provider_name, provider_model, provider_latency = "rule_context", "L1", 0.0
+        reply = None
     else:
         try:
             reply = client.rewrite(
@@ -500,17 +536,22 @@ def understand_query(
                 context,
                 terminology=flatten_mapping(parse_terms(spec["terms"])) or None,
                 timeout_ms=int(config.get("timeout_ms", get_settings().rewrite_timeout_ms)),
+                provider_connection_id=connection_id if not provider_spec.get("builtin") else None,
+                provider_connection_revision=provider_spec.get("revision"),
             )
-        except ProviderTimeout:
-            _metrics_inc("fallback_total", "TIMEOUT")
-            return _fallback_payload(text, normalized, original_result, "TIMEOUT", mode)
+        except ProviderTimeout as exc:
+            reason = getattr(exc, "fallback_code", "TIMEOUT")
+            _metrics_inc("fallback_total", reason)
+            return _fallback_payload(text, normalized, original_result, reason, mode)
         except ProviderBusy:
             # V2 §3.3：有界队列满 → 立即回退原文（不重试、不计数为服务故障）
             _metrics_inc("fallback_total", "REWRITER_BUSY")
             return _fallback_payload(text, normalized, original_result, "REWRITER_BUSY", mode)
-        except ProviderUnavailable:
-            _metrics_inc("fallback_total", "PROVIDER_UNAVAILABLE")
-            return _fallback_payload(text, normalized, original_result, "PROVIDER_UNAVAILABLE", mode)
+        except ProviderUnavailable as exc:
+            # 外部模型 V1：AUTH/QUOTA/RATE_LIMIT 等细分原因码透出（§4.3 表）
+            reason = getattr(exc, "fallback_code", "PROVIDER_UNAVAILABLE")
+            _metrics_inc("fallback_total", reason)
+            return _fallback_payload(text, normalized, original_result, reason, mode)
         except RewriteParseError:
             _metrics_inc("fallback_total", "INVALID_JSON")
             return _fallback_payload(text, normalized, original_result, "INVALID_JSON", mode)
@@ -552,8 +593,18 @@ def understand_query(
         project_id,
         {"rewrite": rewrite.model_dump(), "safety": safety.model_dump()},
     )
+    provider_trace = {
+        "connection_id": connection_id,
+        "connection_revision": provider_spec.get("revision"),
+        "provider": provider_name,
+        "model_id": provider_model,
+        "provider_request_id": reply.request_id if reply is not None else None,
+        "provider_latency_ms": provider_latency,
+        "usage": reply.usage.model_dump() if reply is not None and reply.usage else None,
+    }
     return _finalize(
-        project_id, mode, text, context, rewrite, safety, original_result, rewrite_route, started
+        project_id, mode, text, context, rewrite, safety, original_result, rewrite_route, started,
+        provider_trace=provider_trace,
     )
 
 
@@ -569,6 +620,7 @@ def _finalize(
     started: float,
     cache_hit: bool = False,
     extra: dict[str, Any] | None = None,
+    provider_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if safety is not None:
         downstream, source, decision = _decide_downstream(mode, safety, rewrite)
@@ -617,6 +669,8 @@ def _finalize(
         "fallback_reason": None,
         "final_route": original_result["route"],  # §7.4 恒为原文路由
         "cache_hit": cache_hit,
+        # 外部模型 V1 §9.4：Playground Trace（provider 元信息，不含密钥/原文）
+        "provider_trace": provider_trace,
     }
     if extra:
         payload.update(extra)

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from app.errors import ApiError
 from app.query_rewrite.provider import (
     ProviderBusy,
+    ProviderRateLimited,
     ProviderReply,
     ProviderTimeout,
     ProviderUnavailable,
@@ -42,6 +43,18 @@ class RewriteBody(BaseModel):
     context: str | None = Field(default=None, max_length=4000)
     terminology: dict[str, str] | None = None
     timeout_ms: int = Field(default=5000, ge=200, le=120_000)  # 上限 120s：兼容纯 CPU 部署
+    # 外部模型 V1 §7.3：主 API 只传连接引用，绝不传解密后的 Key；
+    # 缺省（旧版本主 API）等价 builtin:local_qwen
+    provider_connection_id: str | None = None
+    provider_connection_revision: int | None = None
+
+
+def _resolve_provider(body: RewriteBody, builtin_provider: RewriteProvider) -> RewriteProvider:
+    if not body.provider_connection_id or body.provider_connection_id == "builtin:local_qwen":
+        return builtin_provider
+    from app.query_rewrite.provider_registry import get_registry
+
+    return get_registry().resolve(body.provider_connection_id, body.provider_connection_revision)
 
 
 def build_rewriter_app(provider: RewriteProvider, warmup: bool = True) -> FastAPI:
@@ -61,8 +74,13 @@ def build_rewriter_app(provider: RewriteProvider, warmup: bool = True) -> FastAP
 
     @app.post("/rewrite")
     def rewrite(body: RewriteBody) -> dict:
+        target = _resolve_provider(body, provider)
+        conn_details = {
+            "provider_connection_id": body.provider_connection_id,
+            "provider_connection_revision": body.provider_connection_revision,
+        }
         try:
-            reply: ProviderReply = provider.rewrite(
+            reply: ProviderReply = target.rewrite(
                 body.original_query, body.context, body.terminology, body.timeout_ms
             )
         except RewriteParseError as exc:
@@ -72,8 +90,14 @@ def build_rewriter_app(provider: RewriteProvider, warmup: bool = True) -> FastAP
             raise ApiError("REWRITER_BUSY", str(exc), 429) from exc
         except ProviderTimeout as exc:
             raise ApiError("TIMEOUT", str(exc), 504) from exc
+        except ProviderRateLimited as exc:
+            # 限流是短时信号：429 + 明细错误码，不计入故障熔断
+            raise ApiError(
+                exc.fallback_code, str(exc), 429, {**conn_details, "retry_after_s": exc.retry_after_s}
+            ) from exc
         except ProviderUnavailable as exc:
-            raise ApiError("PROVIDER_UNAVAILABLE", str(exc), 503) from exc
+            # 远程 Provider 错误子类携带各自 fallback_code（AUTH/QUOTA/INVALID_REQUEST...）
+            raise ApiError(exc.fallback_code, str(exc), 503, dict(conn_details)) from exc
         except FileNotFoundError as exc:
             raise ApiError("PROVIDER_UNAVAILABLE", f"模型文件缺失: {exc}", 503) from exc
         return {
@@ -82,6 +106,10 @@ def build_rewriter_app(provider: RewriteProvider, warmup: bool = True) -> FastAP
             "provider": reply.provider,
             "model_id": reply.model_id,
             "prompt_version": reply.prompt_version,
+            "request_id": reply.request_id,
+            "usage": reply.usage.model_dump() if reply.usage else None,
+            "connection_id": reply.connection_id or body.provider_connection_id,
+            "connection_revision": reply.connection_revision or body.provider_connection_revision,
         }
 
     @app.get("/health")
@@ -95,6 +123,10 @@ def build_rewriter_app(provider: RewriteProvider, warmup: bool = True) -> FastAP
         metrics_fn = getattr(provider, "metrics", None)
         if callable(metrics_fn):
             info["metrics"] = metrics_fn()
+        # 外部模型 V1 §11：registry 缓存摘要（远程连接数 / revision）
+        from app.query_rewrite.provider_registry import get_registry
+
+        info["registry"] = get_registry().snapshot()
         return JSONResponse(status_code=200 if info.get("ok") else 503, content=info)
 
     # ApiError 结构与主 API 同构（rewriter 独立进程，需自带 handler）

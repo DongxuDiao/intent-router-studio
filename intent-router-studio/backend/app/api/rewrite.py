@@ -116,13 +116,27 @@ def _config_to_dict(row) -> dict:
 def get_rewrite_config(project_id: str, db: Session = Depends(get_db)) -> dict:
     spec = rewrite_service.get_project_rewrite_config(db, project_id)
     versions = rewrite_service.list_rewrite_configs(db, project_id)
+    provider = spec["provider"]
     return {
         "active": {
             "id": spec["config_version_id"],
             "config": spec["config"],
         },
         "defaults": rewrite_service.REWRITE_CONFIG_DEFAULTS,
-        # V2 §4.3 方案A：生成模型参数来自部署（只读），与项目策略配置分开展示
+        # 外部模型 V1 §7.2：当前生效的模型连接（内置或远程）
+        "selected_provider": {
+            "id": provider["id"],
+            "name": provider["name"],
+            "provider_type": provider["provider_type"],
+            "model_id": provider["model_id"],
+            "revision": provider["revision"],
+            "builtin": provider["builtin"],
+            "enabled": provider["enabled"],
+            "available": provider["available"],
+            "last_test_status": provider["last_test_status"],
+        },
+        # V2 §4.3 方案A：生成模型参数来自部署（只读）。外部模型 V1 起该字段进入
+        # 兼容期（deprecated）——仅描述 builtin 部署，前端改读 selected_provider
         "deployment": rewrite_service.deployment_info(),
         "versions": [_config_to_dict(v) for v in versions],
     }

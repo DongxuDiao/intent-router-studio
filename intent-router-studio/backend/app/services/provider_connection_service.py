@@ -168,6 +168,71 @@ def get_connection_dict(db: Session, connection_id: str) -> dict[str, Any]:
     return _to_dict(get_connection(db, connection_id), counts.get(connection_id, 0))
 
 
+def connection_snapshot(db: Session, connection_id: str) -> dict[str, Any]:
+    """编排层轻量快照（外部模型 V1 §8.1 缓存键 / §7.2 selected_provider）。
+
+    builtin 返回占位（模型身份随部署）；远程返回 revision/model/生成参数指纹
+    与可用性。读取失败/不存在返回 available=False 而非抛错——编排层据此回退。
+    """
+    if not connection_id or connection_id == BUILTIN_LOCAL_QWEN:
+        return {
+            "id": BUILTIN_LOCAL_QWEN,
+            "name": BUILTIN_LOCAL_NAME,
+            "provider_type": "local_qwen",
+            "model_id": None,
+            "revision": None,
+            "generation_config_hash": None,
+            "builtin": True,
+            "enabled": True,
+            "egress_acknowledged": True,
+            "last_test_status": None,
+            "available": True,
+        }
+    try:
+        row = db.get(RewriteProviderConnection, connection_id)
+    except Exception:
+        row = None
+    if row is None:
+        return {
+            "id": connection_id, "name": connection_id, "provider_type": "unknown",
+            "model_id": None, "revision": None, "generation_config_hash": None,
+            "builtin": False, "enabled": False, "egress_acknowledged": False,
+            "last_test_status": None, "available": False, "missing": True,
+        }
+    try:
+        fingerprint = GenerationConfig(**(row.generation_config or {})).fingerprint()
+    except Exception:
+        fingerprint = "invalid"
+    return {
+        "id": row.id,
+        "name": row.name,
+        "provider_type": row.provider_type,
+        "model_id": row.model_id,
+        "revision": row.revision,
+        "generation_config_hash": fingerprint,
+        "builtin": False,
+        "enabled": bool(row.enabled),
+        "egress_acknowledged": row.egress_acknowledged_at is not None,
+        "last_test_status": row.last_test_status,
+        "available": bool(row.enabled) and bool(row.api_key_ciphertext),
+    }
+
+
+def validate_connection_for_config(db: Session, connection_id: str) -> None:
+    """项目保存配置时的连接校验（外部模型 V1 §6.2）：存在、启用、已确认外发。"""
+    snap = connection_snapshot(db, connection_id)
+    if snap.get("missing"):
+        raise ApiError("VALIDATION_ERROR", f"改写模型连接不存在: {connection_id}", 422)
+    if not snap["enabled"]:
+        raise ApiError("VALIDATION_ERROR", f"改写模型连接已禁用: {connection_id}", 422)
+    if not snap["egress_acknowledged"]:
+        raise ApiError(
+            "EGRESS_NOT_ACKNOWLEDGED",
+            f"连接 {connection_id} 未确认外部数据传输，不能选为项目改写模型",
+            422,
+        )
+
+
 # ---------------------------------------------------------------- 创建 / 更新 / 删除
 
 def create_connection(db: Session, payload: dict[str, Any]) -> RewriteProviderConnection:
@@ -331,7 +396,10 @@ def delete_connection(db: Session, connection_id: str) -> None:
     provider, model = row.provider_type, row.model_id
     db.delete(row)
     db.commit()
-    _notify_connection_changed(None)
+    # 通知仍携带连接 ID（行已删除，用轻量对象），各进程据此清缓存与熔断
+    from types import SimpleNamespace
+
+    _notify_connection_changed(SimpleNamespace(id=connection_id, provider_type=provider, model_id=model))
     logger.info("provider_connection_deleted %s", _log_safe({"id": connection_id, "provider": provider, "model": model}))
 
 

@@ -339,7 +339,7 @@ def test_invalid_json_degrades_without_tripping_breaker(client, project_id, runt
         assert resp.status_code == 200
         assert resp.json()["fallback_reason"] == "INVALID_JSON"
     assert calls["n"] == 3  # 422 不计熔断，每次都真实请求
-    assert client_http._breaker_state() == "closed"
+    assert client_http.breaker_summary()["builtin:local_qwen"]["state"] == "closed"
 
 
 # ---------------------------------------------------------------- /predict 兼容与集成（§20）
@@ -579,7 +579,7 @@ def test_rewrite_health_endpoint(client, project_id, runtime, install_rewriter):
     resp = client.get("/api/v1/inference/rewrite/health")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["breaker_state"] in ("closed", "open", "half-open")
+    assert data["connections"]["builtin:local_qwen"]["state"] in ("closed", "open", "half-open")
     assert "metrics" in data
     assert "requests_total" in data["metrics"]
 

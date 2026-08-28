@@ -119,13 +119,17 @@ def _client_for(server: _ScriptedServer, **kw) -> RewriteClient:
     return client
 
 
+def _state(client) -> str:
+    """外部模型 V1：熔断按连接隔离，内置连接的键为 builtin:local_qwen。"""
+    return client.breaker_summary()["builtin:local_qwen"]["state"]
+
 def test_breaker_opens_after_consecutive_failures():
     server = _ScriptedServer([503] * 10)
     client = _client_for(server)
     for _ in range(5):
         with pytest.raises(ProviderUnavailable):
             client.rewrite("q", None)
-    assert client._breaker_state() == "open"
+    assert _state(client) == "open"
     before = server.calls
     with pytest.raises(ProviderUnavailable, match="熔断"):
         client.rewrite("q", None)
@@ -139,7 +143,7 @@ def test_breaker_half_open_lets_request_through():
         with pytest.raises(ProviderUnavailable):
             client.rewrite("q", None)
     time.sleep(0.25)  # 超过 open_seconds
-    assert client._breaker_state() == "half-open"
+    assert _state(client) == "half-open"
     with pytest.raises(ProviderUnavailable):
         client.rewrite("q", None)  # 放行但仍失败
     assert server.calls == 6
@@ -151,7 +155,7 @@ def test_invalid_json_does_not_trip_breaker():
     for _ in range(6):
         with pytest.raises(RewriteParseError):
             client.rewrite("q", None)
-    assert client._breaker_state() == "closed"  # 内容问题不计入熔断
+    assert _state(client) == "closed"  # 内容问题不计入熔断
 
 
 def test_success_resets_failure_streak():
@@ -161,13 +165,13 @@ def test_success_resets_failure_streak():
         client.rewrite("q", None)
     with pytest.raises(ProviderUnavailable):
         client.rewrite("q", None)
-    assert client._consecutive_failures == 2
+    assert client.breaker_summary()["builtin:local_qwen"]["consecutive_failures"] == 2
     assert client.rewrite("q", None).output.standalone_query
-    assert client._consecutive_failures == 0
+    assert client.breaker_summary()["builtin:local_qwen"]["consecutive_failures"] == 0
     for _ in range(4):  # streak 被重置，4 次 < 阈值 5
         with pytest.raises(ProviderUnavailable):
             client.rewrite("q", None)
-    assert client._breaker_state() == "closed"
+    assert _state(client) == "closed"
 
 
 def test_busy_429_does_not_trip_breaker():
@@ -177,13 +181,13 @@ def test_busy_429_does_not_trip_breaker():
     for _ in range(6):
         with pytest.raises(ProviderBusy):
             client.rewrite("q", None)
-    assert client._breaker_state() == "closed"
-    assert client.total_failures == 0
+    assert _state(client) == "closed"
+    assert client.breaker_summary()["builtin:local_qwen"]["total_failures"] == 0
 
 
 def test_client_health_never_raises():
     server = _ScriptedServer([503])
     client = _client_for(server)
     info = client.health()
-    assert info["breaker_state"] in ("closed", "open", "half-open")
+    assert info["connections"]["builtin:local_qwen"]["state"] in ("closed", "open", "half-open")
     assert "rewriter" in info
