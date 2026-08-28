@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import random
 from collections.abc import Callable
@@ -26,17 +27,13 @@ PARAM_RANGES = {
     "max_length": (64, 512),
     "seed": (0, 2**31 - 1),
     "num_iterations": (1, 50),
+    "max_embedding_pairs": (500, 20_000),
 }
 
-# SetFit 会按 num_iterations 扩展对比学习样本；这个乘积是 CPU 内存的
-# 主要先验风险信号。超过上限时在入队前拒绝，避免训练进程被 OOM killer
-# 直接杀死后只能显示为 WORKER_RESTART。
-MAX_TRAINING_PAIR_SAMPLES = 150_000
-
 PRESETS = {
-    "quick": {"num_epochs": 1, "num_iterations": 3, "batch_size": 4},
-    "standard": {"num_epochs": 2, "num_iterations": 5, "batch_size": 8},
-    "strict": {"num_epochs": 5, "num_iterations": 10, "batch_size": 8},
+    "quick": {"num_epochs": 1, "num_iterations": 3, "batch_size": 4, "max_embedding_pairs": 2_000},
+    "standard": {"num_epochs": 2, "num_iterations": 5, "batch_size": 8, "max_embedding_pairs": 4_000},
+    "strict": {"num_epochs": 5, "num_iterations": 10, "batch_size": 8, "max_embedding_pairs": 8_000},
 }
 
 
@@ -51,6 +48,8 @@ class TrainConfig:
     body_learning_rate: float = 2e-5
     sampling_strategy: str = "oversampling"
     num_iterations: int = 5
+    max_embedding_pairs: int = 4_000
+    fine_tune_embeddings: bool = False
     normalize_embeddings: bool = True
     max_text_chars: int = 4000
 
@@ -79,29 +78,26 @@ def validate_config(cfg: TrainConfig) -> dict[str, str]:
     return errors
 
 
-def training_pair_samples(sample_count: int, config: TrainConfig) -> int:
-    """估算 SetFit 对比学习样本规模，供入队前资源预检使用。"""
-    return max(0, int(sample_count)) * max(1, int(config.num_iterations))
+def requested_training_pairs(sample_count: int, config: TrainConfig) -> int:
+    """SetFit 默认会为每轮生成正负两组配对。"""
+    return max(0, int(sample_count)) * max(1, int(config.num_iterations)) * 2
 
 
-def validate_resource_budget(
-    sample_count: int,
-    config: TrainConfig,
-    max_pair_samples: int = MAX_TRAINING_PAIR_SAMPLES,
-) -> dict[str, int | str]:
-    """返回资源预检结果；超预算抛出带操作建议的 ValueError。"""
-    pair_samples = training_pair_samples(sample_count, config)
-    if pair_samples > max_pair_samples:
-        raise ValueError(
-            "训练资源预算超限: "
-            f"样本数 {sample_count} × num_iterations {config.num_iterations} = {pair_samples:,}, "
-            f"上限 {max_pair_samples:,}。请降低 num_iterations 或拆分数据集后重试。"
-        )
+def build_resource_plan(sample_count: int, config: TrainConfig) -> dict[str, int | str | bool]:
+    """构造有界嵌入训练计划，超出的配对不会在内存中实例化。"""
+    requested_pairs = requested_training_pairs(sample_count, config)
+    effective_pairs = min(requested_pairs, config.max_embedding_pairs) if config.fine_tune_embeddings else 0
+    classifier_batch_size = min(64, max(16, config.batch_size * 8))
     return {
         "sample_count": int(sample_count),
         "num_iterations": int(config.num_iterations),
-        "pair_samples": pair_samples,
-        "max_pair_samples": int(max_pair_samples),
+        "requested_pair_samples": requested_pairs,
+        "effective_pair_samples": effective_pairs,
+        "max_embedding_pairs": int(config.max_embedding_pairs),
+        "embedding_max_steps": max(1, math.ceil(effective_pairs / config.batch_size)) if effective_pairs else 0,
+        "classifier_batch_size": classifier_batch_size,
+        "capped": requested_pairs > effective_pairs,
+        "mode": "fine_tune_embeddings" if config.fine_tune_embeddings else "frozen_encoder",
         "status": "ok",
     }
 
@@ -255,6 +251,22 @@ def train_router(
 
     from setfit import SetFitTrainer, TrainingArguments  # noqa: F401 兼容不同版本
 
+    resource_plan = build_resource_plan(len(texts), config)
+    training_args = TrainingArguments(
+        output_dir=str(checkpoint_dir),
+        batch_size=(config.batch_size, int(resource_plan["classifier_batch_size"])),
+        num_epochs=config.num_epochs,
+        max_steps=max(1, int(resource_plan["embedding_max_steps"])),
+        sampling_strategy=config.sampling_strategy,
+        # SetFit 1.1.x 在 num_iterations 非空时会忽略 max_pairs，并把全部
+        # 配对 materialize 成 Dataset；显式置空后 max_steps 才真正限制内存。
+        num_iterations=None,
+        body_learning_rate=config.body_learning_rate,
+        max_length=config.max_length,
+        report_to="none",
+        save_strategy="no",
+    )
+
     os.chdir(workdir)
     try:
         try:
@@ -271,20 +283,28 @@ def train_router(
             # 新版本 SetFit 只暴露 Trainer + TrainingArguments
             from setfit import Trainer
 
-            args = TrainingArguments(
-                batch_size=config.batch_size,
-                num_epochs=config.num_epochs,
-                body_learning_rate=config.body_learning_rate,
-                num_iterations=config.num_iterations,
-            )
-            trainer = Trainer(model=model, args=args, train_dataset=train_dataset)
+            trainer = Trainer(model=model, args=training_args, train_dataset=train_dataset)
 
         _attach_progress(trainer, progress_cb)
 
         start = time.time()
-        if progress_cb:
-            progress_cb(0.15, f"开始训练 device={device} 样本={len(texts)}")
-        trainer.train()
+        if config.fine_tune_embeddings:
+            if progress_cb:
+                progress_cb(
+                    0.15,
+                    f"开始嵌入微调 device={device} 样本={len(texts)} "
+                    f"对比配对={resource_plan['effective_pair_samples']}/{resource_plan['requested_pair_samples']} "
+                    f"steps={resource_plan['embedding_max_steps']}",
+                )
+            trainer.train(args=training_args)
+        else:
+            if progress_cb:
+                progress_cb(
+                    0.15,
+                    f"低内存模式：冻结 BGE 编码器，使用完整 {len(texts)} 条数据训练 SetFit 分类头 "
+                    f"batch={resource_plan['classifier_batch_size']}",
+                )
+            trainer.train_classifier(*trainer.dataset_to_parameters(train_dataset), args=training_args)
     finally:
         os.chdir(previous_cwd)
     elapsed = round(time.time() - start, 1)

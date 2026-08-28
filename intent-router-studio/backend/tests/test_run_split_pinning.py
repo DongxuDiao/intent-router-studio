@@ -14,6 +14,7 @@ import io
 
 import pytest
 
+from app.constants import RunStatus
 from app.errors import ApiError
 from app.models import DatasetSplit, TrainingRun
 from app.services import dataset_service, run_service
@@ -73,6 +74,23 @@ def test_pinned_split_does_not_drift_after_new_splits(db, frozen_dataset):
     resolved = run_service.resolve_run_split(db, run)
     assert resolved.id == pinned_id
     assert run.split_id == pinned_id
+
+
+def test_retry_keeps_split_and_upgrades_legacy_resource_config(db, frozen_dataset):
+    run = run_service.create_run(db, frozen_dataset.project_id, frozen_dataset.id, "", {"train": {"num_iterations": 3}})
+    run.status = RunStatus.INTERRUPTED
+    legacy = dict(run.config)
+    legacy_train = dict(legacy["train"])
+    legacy_train.pop("max_embedding_pairs", None)
+    legacy["train"] = legacy_train
+    legacy["resource_preflight"] = {"status": "stale"}
+    run.config = legacy
+    db.commit()
+
+    retried = run_service.retry_run(db, run.id)
+    assert retried.split_id == run.split_id
+    assert retried.config["train"]["max_embedding_pairs"] == 4_000
+    assert retried.config["resource_preflight"]["effective_pair_samples"] <= 4_000
 
 
 def test_resolve_run_split_legacy_run_pins_now(db, frozen_dataset):

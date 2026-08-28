@@ -47,7 +47,7 @@ docker compose ps          # 等 api 变为 healthy
 python3 scripts/smoke_train.py --base-url http://127.0.0.1:8000/api/v1
 ```
 
-冒烟脚本会在容器内首次下载 `BAAI/bge-small-zh-v1.5`（约 100MB，缓存到 `./var/hf-cache`），随后用 quick 预设（epochs=2, iterations=10）在 400 条示例数据上完成一次真实训练，CPU 下通常 8-15 分钟（取决于机器）。
+冒烟脚本会在容器内首次下载 `BAAI/bge-small-zh-v1.5`（约 100MB，缓存到 `./var/hf-cache`），随后用 quick 预设在 400 条示例数据上完成一次真实训练。Docker 默认冻结 BGE 编码器并训练 SetFit 分类头；打开 `fine_tune_embeddings` 后，嵌入配对仍受 `max_embedding_pairs` 限制。
 
 打开 Web 控制台：**http://127.0.0.1:8000**（前端由 FastAPI 直接托管，单origin，无需单独起 Node）。
 

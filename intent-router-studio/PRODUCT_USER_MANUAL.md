@@ -271,15 +271,17 @@ CSV 文件支持 UTF-8 和 GBK 自动探测。若中文预览异常，建议先�
 
 | 预设 | 默认参数 | 适用场景 |
 |---|---|---|
-| quick | epochs=1，iterations=3，batch=4 | 低内存冒烟验证、演示、检查数据链路 |
-| standard | epochs=2，iterations=5，batch=8 | 日常训练与方案比较 |
-| strict | epochs=5，iterations=10，batch=8 | 正式候选模型，耗时更长 |
+| quick | epochs=1，iterations=3，batch=4，pairs≤2,000 | 低内存冒烟验证、演示、检查数据链路 |
+| standard | epochs=2，iterations=5，batch=8，pairs≤4,000 | 日常训练与方案比较 |
+| strict | epochs=5，iterations=10，batch=8，pairs≤8,000 | 正式候选模型，耗时更长 |
 
 底座模型默认为 `BAAI/bge-small-zh-v1.5`，分类训练使用 SetFit。
 
 Docker 中一般使用 CPU；Mac 原生运行可以自动使用 MPS。
 
-SetFit 会按 `num_iterations` 扩展对比学习样本。为避免 CPU Worker 被 OOM killer 终止，系统在提交前限制 `样本数 × num_iterations ≤ 150,000`；超过上限时请降低 iterations 或拆分数据集。训练配置默认使用 `max_length=128`，需要更高内存时再手动调大。
+SetFit 会按 `num_iterations` 扩展正负对比配对。SetFit 1.1.x 在该参数非空时会把全部配对实例化到内存，因此系统训练时会将配对数量截断到 `max_embedding_pairs`：嵌入体只使用有界配对进行微调，分类头仍使用完整训练集。训练配置默认使用 `max_length=128`；只有在机器内存充足时才应调大 `max_embedding_pairs` 或 `max_length`。
+
+本地 Docker 默认启用低内存模式（`fine_tune_embeddings=false`）：冻结 BGE-small 编码器，只使用完整训练集训练 SetFit 分类头。该模式不会保存 Transformer 反向传播状态，适合 8GB Docker VM。只有具备更大内存或 GPU 时才建议打开“微调 BGE 嵌入体（高内存）”；打开后仍受 `max_embedding_pairs` 上限保护。
 
 ### 8.3 安全约束
 

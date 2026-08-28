@@ -18,7 +18,7 @@ from app.models import AuditEvent, DatasetSplit, DatasetVersion, ModelVersion, P
 from app.router_core.policy import Thresholds
 from app.router_core.taxonomy import LABELS
 from app.router_core.threshold_search import DEFAULT_SEARCH_SPEC, route_metrics
-from app.router_core.training import TrainConfig, validate_resource_budget
+from app.router_core.training import TrainConfig, build_resource_plan
 from app.services import artifact_service, dataset_service
 
 # ---------------------------------------------------------------- 生命周期互斥锁（V2 §3.5）
@@ -100,10 +100,7 @@ def create_run(db: Session, project_id: str, dataset_version_id: str, name: str,
     except ValueError as exc:
         raise ApiError("VALIDATION_ERROR", str(exc), 422) from exc
 
-    try:
-        resource_preflight = validate_resource_budget(dataset.sample_count, train_cfg)
-    except ValueError as exc:
-        raise ApiError("TRAINING_RESOURCE_LIMIT", str(exc), 422) from exc
+    resource_preflight = build_resource_plan(dataset.sample_count, train_cfg)
 
     full_config = {"train": train_cfg.to_dict(), "threshold_search": search_spec, "resource_preflight": resource_preflight}
 
@@ -196,12 +193,20 @@ def retry_run(db: Session, run_id: str) -> TrainingRun:
     run = get_run(db, run_id)
     if run.status not in (RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.INTERRUPTED):
         raise ApiError("RUN_NOT_RETRYABLE", f"仅失败/取消/中断的 Run 可重试，当前 {run.status}", 409)
+    dataset = db.get(DatasetVersion, run.dataset_id)
+    if dataset is None:
+        raise NotFoundError("DatasetVersion", run.dataset_id)
+    retry_config = dict(run.config or {})
+    train_cfg = TrainConfig.from_dict(retry_config.get("train", {}))
+    retry_config["train"] = train_cfg.to_dict()
+    retry_config["resource_preflight"] = build_resource_plan(dataset.sample_count, train_cfg)
     new_run = TrainingRun(
         id=ids.prefixed(ids.RUN),
         project_id=run.project_id,
         dataset_id=run.dataset_id,
+        split_id=run.split_id,
         name=f"{run.name}-retry",
-        config=run.config,
+        config=retry_config,
         status=RunStatus.QUEUED,
         parent_run_id=run.id,
     )

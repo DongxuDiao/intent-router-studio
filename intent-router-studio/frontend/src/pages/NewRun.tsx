@@ -9,15 +9,16 @@ import { useProject } from '../store/project'
 import type { DatasetVersion, TrainingRun } from '../types'
 
 const PRESETS: Record<string, { label: string; note: string; cfg: Record<string, number> }> = {
-  quick: { label: 'quick（低内存演示）', note: 'epochs=1, iterations=3, batch=4', cfg: { num_epochs: 1, num_iterations: 3, batch_size: 4 } },
-  standard: { label: 'standard（常规）', note: 'epochs=2, iterations=5, batch=8', cfg: { num_epochs: 2, num_iterations: 5, batch_size: 8 } },
-  strict: { label: 'strict（更高质量）', note: 'epochs=5, iterations=10, batch=8', cfg: { num_epochs: 5, num_iterations: 10, batch_size: 8 } },
+  quick: { label: 'quick（低内存演示）', note: 'epochs=1, iterations=3, batch=4, pairs≤2,000', cfg: { num_epochs: 1, num_iterations: 3, batch_size: 4, max_embedding_pairs: 2_000 } },
+  standard: { label: 'standard（常规）', note: 'epochs=2, iterations=5, batch=8, pairs≤4,000', cfg: { num_epochs: 2, num_iterations: 5, batch_size: 8, max_embedding_pairs: 4_000 } },
+  strict: { label: 'strict（更高质量）', note: 'epochs=5, iterations=10, batch=8, pairs≤8,000', cfg: { num_epochs: 5, num_iterations: 10, batch_size: 8, max_embedding_pairs: 8_000 } },
 }
 
 const PARAM_BOUNDS = {
   batch_size: [4, 64],
   num_epochs: [1, 20],
   num_iterations: [1, 50],
+  max_embedding_pairs: [500, 20_000],
   max_length: [64, 512],
   seed: [0, 2147483647],
 } as const
@@ -31,6 +32,8 @@ export default function NewRun() {
   const [numIterations, setNumIterations] = useState(3)
   const [batchSize, setBatchSize] = useState(4)
   const [maxLength, setMaxLength] = useState(128)
+  const [maxEmbeddingPairs, setMaxEmbeddingPairs] = useState(2_000)
+  const [fineTuneEmbeddings, setFineTuneEmbeddings] = useState(false)
   const [seed, setSeed] = useState(42)
   const [learningRate, setLearningRate] = useState(2e-5)
   const [maxFwr, setMaxFwr] = useState(0.005)
@@ -46,8 +49,8 @@ export default function NewRun() {
   const trainable = (d: DatasetVersion) =>
     d.status === 'FROZEN' && (d.quality_report?.errors.length ?? 0) === 0 && (d.unlabeled_count ?? 0) === 0
   const selected = datasets.data?.items.find((d) => d.id === datasetId)
-  const pairSamples = (selected?.sample_count ?? 0) * numIterations
-  const overResourceBudget = pairSamples > 150_000
+  const requestedPairSamples = (selected?.sample_count ?? 0) * numIterations * 2
+  const effectivePairSamples = Math.min(requestedPairSamples, maxEmbeddingPairs)
 
   const submit = useMutation({
     mutationFn: () =>
@@ -64,6 +67,8 @@ export default function NewRun() {
               num_epochs: numEpochs,
               body_learning_rate: learningRate,
               num_iterations: numIterations,
+              max_embedding_pairs: maxEmbeddingPairs,
+              fine_tune_embeddings: fineTuneEmbeddings,
             },
             threshold_search: {
               constraints: { max_false_write_rate: maxFwr, min_write_precision: minWp },
@@ -121,18 +126,27 @@ export default function NewRun() {
               setNumEpochs(cfg.num_epochs)
               setNumIterations(cfg.num_iterations)
               setBatchSize(cfg.batch_size)
+              setMaxEmbeddingPairs(cfg.max_embedding_pairs)
             }}
             style={{ marginBottom: 16 }}
           />
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-            {PRESETS[preset].note}。所有参数受白名单范围约束；对比样本预算上限为 150,000（超出将无法提交）。
+            {PRESETS[preset].note}。嵌入体的对比配对会自动截断，分类头仍使用完整训练集。
           </Typography.Text>
-          {selected && overResourceBudget && (
+          {!fineTuneEmbeddings && (
             <Alert
-              type="warning"
+              type="success"
               showIcon
               style={{ marginBottom: 12 }}
-              message={`当前配置预计 ${pairSamples.toLocaleString()} 个对比样本，超过 150,000 上限；请降低 num_iterations 或拆分数据集。`}
+              message="低内存模式：冻结 BGE-small 编码器，分类头仍使用完整训练集。"
+            />
+          )}
+          {selected && fineTuneEmbeddings && requestedPairSamples > maxEmbeddingPairs && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={`预计请求 ${requestedPairSamples.toLocaleString()} 个对比配对；实际只构造 ${effectivePairSamples.toLocaleString()} 个，避免嵌入微调耗尽内存。`}
             />
           )}
           <Space wrap size="large">
@@ -151,6 +165,14 @@ export default function NewRun() {
             <div>
               <Typography.Text type="secondary">max_length [{PARAM_BOUNDS.max_length.join(', ')}]</Typography.Text>
               <div><InputNumber min={PARAM_BOUNDS.max_length[0]} max={PARAM_BOUNDS.max_length[1]} step={32} value={maxLength} onChange={(v) => setMaxLength(v ?? 128)} /></div>
+            </div>
+            <div>
+              <Typography.Text type="secondary">max_embedding_pairs [{PARAM_BOUNDS.max_embedding_pairs.join(', ')}]</Typography.Text>
+              <div><InputNumber min={PARAM_BOUNDS.max_embedding_pairs[0]} max={PARAM_BOUNDS.max_embedding_pairs[1]} step={500} value={maxEmbeddingPairs} onChange={(v) => setMaxEmbeddingPairs(v ?? 2_000)} /></div>
+            </div>
+            <div>
+              <Typography.Text type="secondary">微调 BGE 嵌入体（高内存）</Typography.Text>
+              <div><Switch checked={fineTuneEmbeddings} onChange={setFineTuneEmbeddings} /></div>
             </div>
             <div>
               <Typography.Text type="secondary">seed</Typography.Text>
@@ -182,7 +204,7 @@ export default function NewRun() {
   {
     dataset_version_id: datasetId,
     config: {
-      train: { seed, max_length: maxLength, batch_size: batchSize, num_epochs: numEpochs, body_learning_rate: learningRate, num_iterations: numIterations },
+      train: { seed, max_length: maxLength, batch_size: batchSize, num_epochs: numEpochs, body_learning_rate: learningRate, num_iterations: numIterations, max_embedding_pairs: maxEmbeddingPairs, fine_tune_embeddings: fineTuneEmbeddings },
       threshold_search: { constraints: { max_false_write_rate: maxFwr, min_write_precision: minWp } },
     },
   },
@@ -190,7 +212,7 @@ export default function NewRun() {
   2,
 )}
           </pre>
-          <Button type="primary" size="large" disabled={!datasetId || overResourceBudget} loading={submit.isPending} onClick={() => submit.mutate()}>
+          <Button type="primary" size="large" disabled={!datasetId} loading={submit.isPending} onClick={() => submit.mutate()}>
             提交训练（进入队列，Worker 异步执行）
           </Button>
         </Card>

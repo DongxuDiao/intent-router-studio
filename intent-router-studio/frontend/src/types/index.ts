@@ -184,6 +184,8 @@ export interface RunConfig {
     body_learning_rate: number
     sampling_strategy: string
     num_iterations: number
+    max_embedding_pairs: number
+    fine_tune_embeddings: boolean
   }
   threshold_search: Record<string, unknown>
 }
