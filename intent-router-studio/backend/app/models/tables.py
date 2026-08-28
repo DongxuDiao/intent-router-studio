@@ -271,6 +271,40 @@ class RewriteFeedback(Base):
     __table_args__ = (Index("ix_rewrite_feedback_project", "project_id"),)
 
 
+class RewriteProviderConnection(Base):
+    """改写模型连接（外部模型 API 接入 V1 §6.1）。
+
+    - 系统级可复用资源，不随项目删除；项目配置只保存引用
+    - api_key_ciphertext 为 AES-256-GCM 密文（AAD = id:revision），
+      明文 Key 永不落库、永不回显；DELETE /credential 后两列置空
+    - revision 随影响输出/鉴权的字段更新自增，用于 Provider 缓存与缓存键隔离
+    """
+
+    __tablename__ = "rewrite_provider_connections"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    provider_type: Mapped[str] = mapped_column(String(30))  # glm | openai_compatible
+    base_url: Mapped[str] = mapped_column(String(500))
+    model_id: Mapped[str] = mapped_column(String(200))
+    api_key_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_key_nonce: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    api_key_hint: Mapped[str] = mapped_column(String(16), default="****")
+    generation_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    capabilities: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    egress_acknowledged_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # SUCCESS | FAILED
+    last_test_error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_test_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    __table_args__ = (Index("ix_provider_connections_type", "provider_type"),)
+
+
 # ---------------------------------------------------------------- 审计（修改方案 V2 §3.5）
 
 

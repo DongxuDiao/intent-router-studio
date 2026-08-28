@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     rewrite_cache_capacity: int = 5_000
     rewrite_cache_ttl_hours: int = 24
 
+    # ---- 外部模型 Provider（V1 §6.3 / §10）----
+    # 凭据主密钥（32 字节 base64）；不配置时仅本地 Qwen 可用，创建远程连接报错
+    rewrite_credential_master_key: str = ""
+    # 本地开发接 Ollama 等私有地址时显式放开（UI 标红）
+    rewrite_allow_private_provider_urls: bool = False
+
     @property
     def artifact_root_path(self) -> Path:
         return _resolve(self.artifact_root)

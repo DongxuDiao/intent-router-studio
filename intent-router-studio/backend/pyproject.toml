@@ -23,6 +23,8 @@ dependencies = [
     "transformers>=4.38,<5",  # setfit 1.1.x 仍引用 transformers 5 中已删除的 default_logdir
     "datasets>=2.18",
     "torch>=2.2",
+    "httpx>=0.27",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
