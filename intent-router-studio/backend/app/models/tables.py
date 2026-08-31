@@ -37,11 +37,21 @@ class Project(Base):
     active_model_id: Mapped[str | None] = mapped_column(String(40), ForeignKey("model_versions.id", use_alter=True), nullable=True)
     # Query 改写能力（修改方案 §11.1）：指向当前生效的 RewriteConfigVersion
     active_rewrite_config_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # 自定义意图标签：显式当前 Schema 指针（不按最大 version 推断，§4.1）
+    active_label_schema_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("label_schema_versions.id", use_alter=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
 class LabelSchemaVersion(Base):
+    """项目标签 Schema 版本（自定义意图标签方案 §3.1/§4.2）。
+
+    状态机 DRAFT → ACTIVE → SUPERSEDED；一个项目同时只有一个 ACTIVE。
+    已发布版本不可变；schema_json 支持 intent-schema-v1/v2 两种格式。
+    """
+
     __tablename__ = "label_schema_versions"
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
@@ -49,7 +59,18 @@ class LabelSchemaVersion(Base):
     version: Mapped[int] = mapped_column(Integer)
     schema_json: Mapped[dict] = mapped_column(JSON)
     hash: Mapped[str] = mapped_column(String(64))
+    # 生命周期（Phase 1b 迁移补列；旧行由迁移回填 ACTIVE/SUPERSEDED）
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")  # DRAFT/ACTIVE/SUPERSEDED
+    parent_id: Mapped[str | None] = mapped_column(String(40), ForeignKey("label_schema_versions.id"), nullable=True)
+    change_summary: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(100), default="local")
+    published_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_label_schema_project_version"),
+        Index("ix_label_schema_project", "project_id"),
+    )
 
 
 class Upload(Base):
