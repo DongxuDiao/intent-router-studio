@@ -437,14 +437,19 @@ def test_connection(db: Session, connection_id: str) -> dict[str, Any]:
     if not row.api_key_ciphertext:
         raise ApiError("CREDENTIAL_MISSING", "连接没有 API Key，先补录密钥", 422)
 
+    # 外部 Flash 模型在冷启动或繁忙时可能超过 15 秒。测试预算跟随连接的
+    # read_timeout_ms，额外留 1 秒连接/解析余量，同时封顶 120 秒。
+    cfg = GenerationConfig(**(row.generation_config or {}))
+    test_timeout_ms = min(120_000, max(15_000, cfg.read_timeout_ms + 1_000))
     started = time.perf_counter()
     try:
         provider = _build_remote_provider(row)
-        reply = provider.rewrite(TEST_PROBE_QUERY, TEST_PROBE_CONTEXT, None, timeout_ms=15_000)
+        reply = provider.rewrite(TEST_PROBE_QUERY, TEST_PROBE_CONTEXT, None, timeout_ms=test_timeout_ms)
         latency_ms = round((time.perf_counter() - started) * 1000, 1)
         row.last_test_status = "SUCCESS"
         row.last_test_error_code = None
         row.last_test_latency_ms = latency_ms
+        row.last_tested_at = utcnow()
         db.commit()
         _notify_test_succeeded(row)
         logger.info(
@@ -466,6 +471,7 @@ def test_connection(db: Session, connection_id: str) -> dict[str, Any]:
         row.last_test_status = "FAILED"
         row.last_test_error_code = code
         row.last_test_latency_ms = latency_ms
+        row.last_tested_at = utcnow()
         db.commit()
         _notify_test_failed(row)
         logger.warning(

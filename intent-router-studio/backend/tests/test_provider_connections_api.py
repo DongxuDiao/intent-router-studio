@@ -239,6 +239,7 @@ def test_test_connection_success(db, client, monkeypatch):
     assert result["provider_request_id"] == "req_fake"
     body = client.get(f"/api/v1/rewrite/provider-connections/{created['id']}").json()
     assert body["last_test_status"] == "SUCCESS" and body["last_test_latency_ms"] >= 0
+    assert body["last_tested_at"] is not None
 
 
 def test_test_connection_failure_records_code(db, client, monkeypatch):
@@ -248,6 +249,7 @@ def test_test_connection_failure_records_code(db, client, monkeypatch):
     assert result["error_code"] == "PROVIDER_AUTH_FAILED"
     body = client.get(f"/api/v1/rewrite/provider-connections/{created['id']}").json()
     assert body["last_test_error_code"] == "PROVIDER_AUTH_FAILED"
+    assert body["last_tested_at"] is not None
 
 
 def test_test_builtin_rejected(client):

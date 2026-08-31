@@ -2,7 +2,7 @@
  * 外部模型 V1 §9：连接管理（密钥只写不读）、项目级模型选择、egress 确认。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Card, Col, Descriptions, Drawer, Input, InputNumber, Popconfirm, Row, Select, Space, Switch,
+  Alert, AutoComplete, Button, Card, Col, Descriptions, Drawer, Input, InputNumber, Popconfirm, Row, Select, Space, Switch,
   Table, Tag, Typography, message,
 } from 'antd'
 import { useEffect, useState } from 'react'
@@ -43,6 +43,12 @@ const MODE_OPTIONS = (['off', 'normalize_only', 'shadow', 'safe_apply'] as const
 
 const BUILTIN_ID = 'builtin:local_qwen'
 const GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
+/** 智谱 Chat Completions 官方模型代码；AutoComplete 仍允许输入后续新增模型。 */
+const GLM_MODEL_OPTIONS = [
+  'glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.7-flash',
+  'glm-4.7-flashx', 'glm-4.6', 'glm-4.5-air', 'glm-4.5-airx', 'glm-4.5-flash',
+  'glm-4-flash-250414', 'glm-4-flashx-250414',
+].map((value) => ({ value }))
 
 const TYPE_NAMES: Record<string, string> = {
   local_qwen: '本地 Qwen',
@@ -62,6 +68,11 @@ interface ConnDraft {
   thinking_disabled: boolean
   json_mode: boolean
   egress: boolean
+}
+
+interface SaveConnectionResult {
+  saved: ProviderConnection
+  test: ProviderConnectionTestResult | null
 }
 
 function emptyDraft(type: 'glm' | 'openai_compatible' = 'glm'): ConnDraft {
@@ -182,24 +193,31 @@ export default function RewriteSettings() {
     ...(isCreate ? { egress_acknowledged: d.egress } : {}),
   })
 
-  const saveConnection = useMutation({
-    mutationFn: ({ d, thenTest }: { d: ConnDraft; thenTest: boolean }) => {
+  const saveConnection = useMutation<SaveConnectionResult, Error, { d: ConnDraft; thenTest: boolean }>({
+    mutationFn: async ({ d, thenTest }) => {
       const isCreate = editing === null
       const body = connPayload(d, isCreate)
       const request = isCreate
         ? api<ProviderConnection>('/rewrite/provider-connections', { method: 'POST', body: JSON.stringify(body) })
         : api<ProviderConnection>(`/rewrite/provider-connections/${editing.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-      if (!thenTest) return request
+      const saved = await request
+      if (!thenTest) return { saved, test: null }
       // 保存并测试：串行调用（§9.2）
-      return request.then((saved) =>
-        api<ProviderConnectionTestResult>(`/rewrite/provider-connections/${saved.id}/test`, { method: 'POST' }).then((r) => saved),
-      )
+      return {
+        saved,
+        test: await api<ProviderConnectionTestResult>(`/rewrite/provider-connections/${saved.id}/test`, { method: 'POST' }),
+      }
     },
-    onSuccess: (saved, { thenTest }) => {
+    onSuccess: (result, { thenTest }) => {
+      const { saved, test } = result
       setConnDraft((d) => ({ ...d, api_key: '' })) // 密钥即用即弃，不留在前端状态
       invalidateConnections()
-      message.success(thenTest ? `连接已保存并完成测试（${saved.name}）` : '连接已保存；尚未测试，测试通过前不能选为项目改写模型')
-      if (thenTest) setDrawerOpen(false)
+      if (thenTest && test?.status === 'FAILED') {
+        message.error(`连接已保存，但测试失败：${test.error_code ?? '未知错误'}${test.message ? ` · ${test.message}` : ''}`)
+        return
+      }
+      message.success(thenTest ? `连接已保存，测试通过（${saved.name}）` : '连接已保存；尚未测试，测试通过前不能选为项目改写模型')
+      if (thenTest && test?.status === 'SUCCESS') setDrawerOpen(false)
     },
     onError: (e) => message.error(e instanceof ApiError ? `${e.code}: ${e.message}` : '保存失败'),
   })
@@ -210,7 +228,7 @@ export default function RewriteSettings() {
     onSuccess: (r) => {
       invalidateConnections()
       if (r.status === 'SUCCESS') message.success(`测试通过（${Math.round(r.latency_ms ?? 0)}ms）`)
-      else message.error(`测试失败：${r.error_code ?? '未知错误'}`)
+      else message.error(`测试失败：${r.error_code ?? '未知错误'}${r.message ? ` · ${r.message}` : ''}`)
     },
     onError: (e) => message.error(e instanceof ApiError ? `${e.code}: ${e.message}` : '测试失败'),
   })
@@ -297,8 +315,8 @@ export default function RewriteSettings() {
         />
       )}
 
-      <Row gutter={16}>
-        <Col span={12}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xxl={14}>
           <Card
             title="模式与阈值"
             size="small"
@@ -412,8 +430,9 @@ export default function RewriteSettings() {
             title="改写模型连接"
             size="small"
             style={{ marginTop: 16 }}
+            styles={{ body: { minWidth: 0, overflow: 'hidden' } }}
             extra={(
-              <Space>
+              <Space wrap>
                 {selected && (
                   <Tag color={selected.available ? 'green' : 'red'}>
                     当前：{selected.name}
@@ -427,14 +446,16 @@ export default function RewriteSettings() {
               size="small"
               rowKey="id"
               pagination={false}
+              tableLayout="fixed"
+              scroll={{ x: 800 }}
               loading={connections.isLoading}
               dataSource={connItems}
               columns={[
                 {
-                  title: '名称', dataIndex: 'name',
+                  title: '名称', dataIndex: 'name', width: 180, ellipsis: true,
                   render: (n: string, c) => (
-                    <Space size={4}>
-                      <span>{n}</span>
+                    <Space size={4} wrap={false} style={{ maxWidth: '100%' }}>
+                      <Typography.Text ellipsis style={{ maxWidth: c.builtin ? 125 : 160 }}>{n}</Typography.Text>
                       {c.builtin && <Tag style={{ fontSize: 10 }}>内置</Tag>}
                     </Space>
                   ),
@@ -455,9 +476,9 @@ export default function RewriteSettings() {
                   },
                 },
                 {
-                  title: '操作', width: 170,
+                  title: '操作', width: 190,
                   render: (_, c) => (
-                    <Space size={4}>
+                    <Space size={[4, 4]} wrap>
                       {!c.builtin && <Button size="small" onClick={() => openEdit(c)}>编辑</Button>}
                       {!c.builtin && (
                         <Button size="small" loading={testConnection.isPending} onClick={() => testConnection.mutate(c.id)}>
@@ -500,7 +521,7 @@ export default function RewriteSettings() {
           </Card>
         </Col>
 
-        <Col span={12}>
+        <Col xs={24} xxl={10}>
           <Card
             title="术语表（L0 确定性归一）"
             size="small"
@@ -532,7 +553,7 @@ export default function RewriteSettings() {
           <Card title="rewriter 服务健康" size="small" style={{ marginTop: 16 }}>
             {h ? (
               <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                <Descriptions size="small" column={2}>
+                <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
                   <Descriptions.Item label="rewriter">
                     <Tag color={h.rewriter?.ok ? 'green' : 'red'}>{h.rewriter?.ok ? '正常' : '不可用'}</Tag>
                   </Descriptions.Item>
@@ -631,13 +652,26 @@ export default function RewriteSettings() {
             />
           </div>
           <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>Model ID</Typography.Text>
-            <Input
-              value={connDraft.model_id}
-              onChange={(e) => setConnDraft({ ...connDraft, model_id: e.target.value })}
-              placeholder="glm-5.2"
-              maxLength={200}
-            />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Model ID{connDraft.provider_type === 'glm' ? '（请选择官方代码，也可输入新模型）' : ''}
+            </Typography.Text>
+            {connDraft.provider_type === 'glm' ? (
+              <AutoComplete
+                style={{ width: '100%' }}
+                value={connDraft.model_id}
+                options={GLM_MODEL_OPTIONS}
+                onChange={(model_id) => setConnDraft({ ...connDraft, model_id })}
+                placeholder="如 glm-5.2 或 glm-4.5-flash"
+                filterOption={(input, option) => String(option?.value ?? '').includes(input.toLowerCase())}
+              />
+            ) : (
+              <Input
+                value={connDraft.model_id}
+                onChange={(e) => setConnDraft({ ...connDraft, model_id: e.target.value })}
+                placeholder="模型 ID"
+                maxLength={200}
+              />
+            )}
           </div>
           <div>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>

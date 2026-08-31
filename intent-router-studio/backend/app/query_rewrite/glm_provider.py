@@ -68,8 +68,19 @@ class GlmProvider(OpenAICompatibleProvider):
             exc = self._server_error(f"GLM 服务错误（HTTP {status}）")
             exc.retry_after_s = retry_after
             raise exc
-        # 400 / 其余业务码（含 Key 类型不匹配等）→ 请求不合法，提示用户检查配置
-        raise ProviderBadRequest(f"GLM 请求不合法（HTTP {status}，业务码 {code or '-'}）")
+        # 400 / 其余业务码（含 Key 类型不匹配等）→ 请求不合法。错误信息保持
+        # 白名单化，不回传厂商原始正文，但给出足以修正配置的提示。
+        if code == "1210":
+            detail = f"参数错误；请检查模型 ID（当前 {self.model_id}）及生成参数"
+        elif code == "1211":
+            detail = f"模型不存在或当前账号不可用（当前 {self.model_id}）"
+        elif code == "1212":
+            detail = f"模型不支持 Chat Completions（当前 {self.model_id}）"
+        elif code in {"1213", "1214", "1215"}:
+            detail = "请求字段缺失、非法或互斥；请检查生成参数"
+        else:
+            detail = "请检查模型 ID、API Key 类型及生成参数"
+        raise ProviderBadRequest(f"GLM 请求不合法（业务码 {code or '-'}）：{detail}")
 
     def _server_error(self, message: str):
         from app.query_rewrite.provider import ProviderUnavailable

@@ -221,6 +221,25 @@ def test_openai_generic_error_mapping():
     assert calls["n"] == 1
 
 
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("1210", "请检查模型 ID"),
+        ("1211", "模型不存在"),
+        ("1212", "不支持 Chat Completions"),
+        ("1214", "生成参数"),
+    ],
+)
+def test_glm_invalid_request_has_actionable_message(code, expected):
+    handler, calls = _handler([{"error": {"code": code}, "_status": 400}])
+    provider = _glm(httpx.MockTransport(handler))
+    with pytest.raises(ProviderBadRequest) as exc:
+        provider.rewrite("q", None, None, 3000)
+    assert expected in str(exc.value)
+    assert "glm-5.2" in str(exc.value) or code == "1214"
+    assert calls["n"] == 1
+
+
 def test_openai_429_quota_message_maps_to_quota():
     handler, _ = _handler([{"error": {"message": "insufficient quota"}, "_status": 429}])
     provider = _openai(httpx.MockTransport(handler))
