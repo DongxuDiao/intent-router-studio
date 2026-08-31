@@ -26,10 +26,10 @@ from app.router_core.evaluation import (
     latency_stats,
     slice_metrics,
 )
+from app.router_core.label_schema import default_compat_document, ensure_training_labels
 from app.router_core.normalization import encode_input
 from app.router_core.policy import Thresholds, decide
 from app.router_core.splitting import ensure_splits_trainable
-from app.router_core.taxonomy import ensure_label_schema
 from app.router_core.threshold_search import route_metrics, search_thresholds
 from app.services import artifact_service, dataset_service, run_service
 from app.worker import queue
@@ -295,8 +295,16 @@ class RunExecutor:
             texts_by_split[split_name] = [encode_input(t, c) for t, c in zip(sub["text"], sub["context"].where(sub["context"].notna(), None), strict=True)]
             labels_by_split[split_name] = sub["label"].tolist()
 
-        # V2 §3.4 三道防线：训练标签集必须与五分类完全一致（加载模型前失败）
-        ensure_label_schema(labels_by_split["train"])
+        # 自定义意图标签 §6.5：训练标签契约按数据集绑定 Schema 校验
+        # （数据集缺失 Schema 时按兼容五分类处理，旧数据集行为不变）
+        from app.models import LabelSchemaVersion as _LSV
+        from app.services.label_schema_service import resolve_document as _resolve
+
+        schema_row = db.get(_LSV, dataset.schema_id) if getattr(dataset, "schema_id", None) else None
+        schema_doc = _resolve(schema_row) if schema_row is not None else default_compat_document()
+        schema_label_order = schema_doc.label_keys_in_order()
+        ensure_training_labels(labels_by_split["train"], schema_doc)
+        log.log("INFO", f"训练 Schema 标签 {len(schema_label_order)} 类: {schema_label_order}")
         log.progress(RunStatus.PREPARING, 4, f"样本分布 train={len(texts_by_split['train'])} val={len(texts_by_split['validation'])} test={len(texts_by_split['test'])}")
         artifact_service.check_disk_space(500 * 1024 * 1024, multiple=3.0)
         self._check_cancel(run_id, counter)
@@ -319,6 +327,7 @@ class RunExecutor:
             labels_by_split["train"],
             workdir / "_train_tmp",
             progress_cb=progress_cb,
+            label_order=schema_label_order,
         )
         label_order = router.label_order
         log.metric("train_samples", len(texts_by_split["train"]))
@@ -515,9 +524,16 @@ class RunExecutor:
         # ---------- PACKAGING ----------
         log.progress(RunStatus.PACKAGING, 93, "保存模型制品")
         router.save_pretrained(workdir / "setfit_model")
+        # §6.5：制品保存完整 Schema 快照（顺序=分类头顺序）与 hash
         artifact_service.write_json(
             workdir / "label_schema.json",
-            {"schema_version": "labels-v1", "labels": label_order},
+            {
+                "schema_format": "intent-schema-v2",
+                "schema_id": schema_row.id if schema_row is not None else None,
+                "schema_hash": schema_row.hash if schema_row is not None else None,
+                "labels": label_order,
+                "label_definitions": schema_doc.to_dict()["labels"],
+            },
         )
         artifact_service.write_json(
             workdir / "calibration.json",

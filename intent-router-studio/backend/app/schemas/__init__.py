@@ -1,11 +1,13 @@
 """Pydantic 请求模型（v2）。"""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.router_core.taxonomy import IntentLabel  # V2 §3.4：唯一五分类标签类型
+# 自定义意图标签 §6.3：label 改为受长度/格式约束的字符串，
+# 合法性由目标 Schema 在服务层动态校验（V2 §3.4 的入口 Literal 收窄移除）
+LabelKey = Annotated[str, Field(min_length=1, max_length=64)]
 
 
 class ProjectCreate(BaseModel):
@@ -26,7 +28,7 @@ class ImportConfig(BaseModel):
     mode: Literal["prelabeled", "unlabeled", "single_label"] = "prelabeled"
     columns: dict[str, str | None] = Field(default_factory=dict)
     label_mapping: dict[str, str] = Field(default_factory=dict)
-    default_label: IntentLabel | None = None
+    default_label: LabelKey | None = None
     encoding: str | None = None
     name: str | None = None
 
@@ -40,7 +42,7 @@ class DraftChange(BaseModel):
     action: Literal["add", "update", "remove"]
     sample_id: str | None = None
     text: str | None = None
-    label: IntentLabel | None = None  # 非法标签入口即 422
+    label: LabelKey | None = None  # 合法性由项目 Schema 服务层校验
     context: str | None = None
     group_id: str | None = None
     risk_slice: str | None = None
@@ -55,7 +57,7 @@ class DraftCreate(BaseModel):
 
 
 class SamplePatch(BaseModel):
-    label: IntentLabel | None = None
+    label: LabelKey | None = None
     is_hard_negative: bool | None = None
     risk_slice: str | None = None
     group_id: str | None = None
@@ -121,7 +123,7 @@ class CompareRequest(BaseModel):
 class PlaygroundCaseRequest(BaseModel):
     text: str
     context: str | None = None
-    expected_label: IntentLabel | None = None
+    expected_label: LabelKey | None = None
     predicted_route: str | None = None
     model_version_id: str | None = None
     tags: dict[str, Any] | None = None

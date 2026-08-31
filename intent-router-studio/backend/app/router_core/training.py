@@ -200,6 +200,7 @@ def train_router(
     train_labels: list[str],
     workdir: Path,
     progress_cb: Callable[[float, str], None] | None = None,
+    label_order: list[str] | None = None,
 ) -> TrainedRouter:
     """执行 SetFit 训练并返回封装后的模型。
 
@@ -225,9 +226,11 @@ def train_router(
 
     if progress_cb:
         progress_cb(0.05, f"加载基础模型 {config.base_model_id}")
+    # 自定义意图标签 §6.5：分类头顺序显式来自 Schema；缺省才回退 sorted(set(...))
+    head_labels = list(label_order) if label_order else (sorted(set(train_labels)) or None)
     model = SetFitModel.from_pretrained(
         config.base_model_id,
-        labels=sorted(set(train_labels)) or None,
+        labels=head_labels,
     )
     if hasattr(model, "max_length"):
         try:
@@ -311,7 +314,7 @@ def train_router(
     if progress_cb:
         progress_cb(0.98, f"训练完成，耗时 {elapsed}s")
 
-    return TrainedRouter(model, _prob_columns(model, sorted(set(train_labels))))
+    return TrainedRouter(model, _prob_columns(model, label_order or sorted(set(train_labels))))
 
 
 def _attach_progress(trainer, progress_cb) -> None:

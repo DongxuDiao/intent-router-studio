@@ -31,6 +31,12 @@ def _build_artifact(tmp_path, monkeypatch) -> None:
     (model_dir / "model.safetensors").write_bytes(b"legit-weights-aaaa")
     (model_dir / "config.json").write_text('{"model_type": "stub"}', encoding="utf-8")
     artifact_service.write_json(tmp_path / "thresholds.json", Thresholds().to_dict())
+    # Phase 2 §6.7：制品必须携带标签顺序（缺失 fail closed），manifest 覆盖其哈希
+    artifact_service.write_json(
+        tmp_path / "label_schema.json",
+        {"schema_format": "intent-schema-v2", "schema_id": None, "schema_hash": None,
+         "labels": list(LABELS), "label_definitions": []},
+    )
     artifact_service.build_manifest(tmp_path, {"run_id": "run_test"})
 
 

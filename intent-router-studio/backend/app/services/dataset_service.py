@@ -21,7 +21,7 @@ from app.errors import ApiError, NotFoundError
 from app.models import DatasetQualityReport, DatasetSplit, DatasetVersion, Project, Upload
 from app.router_core.normalization import NORMALIZATION_VERSION, normalized_hash
 from app.router_core.splitting import DEFAULT_RATIOS, group_split
-from app.router_core.taxonomy import LABEL_SCHEMA_VERSION, LABELS
+from app.router_core.taxonomy import LABEL_SCHEMA_VERSION
 from app.services import artifact_service
 
 ALLOWED_EXTENSIONS = {"csv", "jsonl", "xlsx", "txt"}
@@ -147,6 +147,14 @@ def save_upload(db: Session, project_id: str, original_name: str, content: bytes
         writer.abort()
         raise
 
+
+def _project_label_keys(db: Session, project_id: str) -> list[str]:
+    """导入/标注/校验的合法标签集合（自定义意图标签 §6.3）：
+    项目 ACTIVE Schema 的 active 标签；无 Schema 时回退兼容五分类。"""
+    from app.services.label_schema_service import active_document
+
+    _, doc = active_document(db, project_id)
+    return doc.label_keys_in_order()
 
 def _guard_xlsx(content: bytes, settings) -> None:
     """V2 §4.4：XLSX 压缩炸弹防护——解压后总大小 / sheet 数 / 首表行列上限。"""
@@ -294,7 +302,8 @@ def import_upload(db: Session, upload_id: str, config: dict) -> DatasetVersion:
     if mode == "prelabeled" and not label_col:
         raise ApiError("VALIDATION_ERROR", "已标注数据导入必须映射标签列", 422)
     default_label = config.get("default_label")
-    if mode == "single_label" and default_label not in LABELS:
+    import_valid_labels = _project_label_keys(db, upload.project_id)
+    if mode == "single_label" and default_label not in import_valid_labels:
         raise ApiError("VALIDATION_ERROR", f"按标签导入需要合法标签，得到 {default_label!r}", 422)
 
     df, _encoding = read_tabular(upload, config.get("encoding"))
@@ -336,7 +345,7 @@ def import_upload(db: Session, upload_id: str, config: dict) -> DatasetVersion:
             mapped = label_mapping.get(raw_label, raw_label)
             if mapped in ("", "__skip__", None):
                 continue
-            if mapped not in LABELS:
+            if mapped not in import_valid_labels:
                 bad_labels[mapped] = bad_labels.get(mapped, 0) + 1
                 continue
             label = mapped
@@ -603,8 +612,9 @@ def update_sample(db: Session, dataset_id: str, sample_id: str, patch: dict) -> 
     pos = idx[0]
 
     new_label = patch.get("label")
-    if new_label is not None and new_label not in LABELS:
-        raise ApiError("INVALID_LABEL", f"非法标签 {new_label}", 422)
+    valid_labels = _project_label_keys(db, dataset.project_id)
+    if new_label is not None and new_label not in valid_labels:
+        raise ApiError("INVALID_LABEL", f"非法标签 {new_label}（合法: {valid_labels}）", 422)
 
     if new_label is not None:
         n_hash = frame.at[pos, "normalized_hash"]
@@ -653,12 +663,13 @@ def validate_dataset(db: Session, dataset_id: str) -> dict:
     warnings: list[dict] = []
 
     # V2 §3.4：非法标签 / 空标签阻断，并指出样本 ID
-    bad_mask = frame["label"].notna() & (frame["label"] != "") & ~frame["label"].isin(LABELS)
+    valid_labels = _project_label_keys(db, dataset.project_id)
+    bad_mask = frame["label"].notna() & (frame["label"] != "") & ~frame["label"].isin(valid_labels)
     if bad_mask.any():
         errors.append(
             {
                 "code": "INVALID_LABEL",
-                "message": f"{int(bad_mask.sum())} 条样本标签不在五分类内",
+                "message": f"{int(bad_mask.sum())} 条样本标签不在项目 Schema 内（合法: {valid_labels}）",
                 "details": {
                     "sample_ids": frame.loc[bad_mask, "sample_id"].head(10).tolist(),
                     "labels": sorted(set(frame.loc[bad_mask, "label"])),
@@ -691,7 +702,7 @@ def validate_dataset(db: Session, dataset_id: str) -> dict:
             )
     present = {lab for lab in hash_labels.values() for lab in lab}
     if present:
-        missing_classes = [lab for lab in LABELS if lab not in present]
+        missing_classes = [lab for lab in valid_labels if lab not in present]
         if missing_classes:
             errors.append(
                 {
@@ -772,6 +783,7 @@ def create_draft(db: Session, source_dataset_id: str, changes: list[dict], name:
     frame = load_dataset_frame(source)
     summary: list[str] = []
 
+    draft_valid_labels = _project_label_keys(db, source.project_id)
     for change in changes:
         action = change.get("action")
         if action == "update":
@@ -780,7 +792,7 @@ def create_draft(db: Session, source_dataset_id: str, changes: list[dict], name:
                 raise ApiError("VALIDATION_ERROR", f"样本不存在: {change.get('sample_id')}", 422)
             pos = idx[0]
             if "label" in change and change["label"]:
-                if change["label"] not in LABELS:  # V2 §3.4：update 与 add 同样校验
+                if change["label"] not in draft_valid_labels:  # 合法集合来自项目 Schema
                     raise ApiError("INVALID_LABEL", f"非法标签 {change['label']}", 422)
                 frame.at[pos, "label"] = change["label"]
             if "is_hard_negative" in change:
@@ -793,7 +805,7 @@ def create_draft(db: Session, source_dataset_id: str, changes: list[dict], name:
             if not text:
                 raise ApiError("VALIDATION_ERROR", "新增样本缺少文本", 422)
             label = change.get("label")
-            if label and label not in LABELS:
+            if label and label not in draft_valid_labels:
                 raise ApiError("INVALID_LABEL", f"非法标签 {label}", 422)
             context = change.get("context")
             frame = pd.concat(

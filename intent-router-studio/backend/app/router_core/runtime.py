@@ -19,7 +19,6 @@ import numpy as np
 from app.router_core.calibration import calibrate
 from app.router_core.normalization import encode_input, normalize_text
 from app.router_core.policy import Thresholds, decide
-from app.router_core.taxonomy import LABELS
 
 
 class ModelRuntime:
@@ -33,9 +32,13 @@ class ModelRuntime:
         thresholds: Thresholds,
         model_version_id: str,
         threshold_version_id: str | None = None,
+        effect_map: dict[str, str] | None = None,
     ) -> None:
         self.model = model
         self.labels = list(labels)
+        # 自定义意图标签 §6.8：标签→系统效果类型（来自制品 label_definitions；
+        # 缺省恒等映射=五分类行为不变）；Policy 只信任该服务端映射
+        self.effect_map = dict(effect_map) if effect_map else {}
         self.temperature = float(temperature)
         self.thresholds = thresholds
         self.model_version_id = model_version_id
@@ -61,13 +64,16 @@ class ModelRuntime:
                 raise FileNotFoundError(f"制品缺少 manifest.json: {artifact_dir}")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
+        # §6.7：只信任制品中的标签顺序；缺失/为空属制品损坏，fail closed
+        # （禁止回退固定五分类——分类头维度可能错位导致概率列张冠李戴）
         label_path = artifact_dir / "label_schema.json"
-        labels = LABELS
+        labels: list[str] = []
         if label_path.is_file():
             schema = json.loads(label_path.read_text(encoding="utf-8"))
             loaded = [item["key"] if isinstance(item, dict) else str(item) for item in schema.get("labels", [])]
-            if loaded:
-                labels = loaded
+            labels = loaded
+        if not labels:
+            raise RuntimeError(f"MODEL_SCHEMA_MISMATCH: 制品缺少合法 label_schema.json: {artifact_dir}")
 
         temperature = 1.0
         calib_path = artifact_dir / "calibration.json"
@@ -85,9 +91,16 @@ class ModelRuntime:
         # setfit 1.x 从本地目录加载用 from_pretrained（load_pretrained 已不存在）
         model = SetFitModel.from_pretrained(str(artifact_dir / "setfit_model"))
 
+        effect_map = {
+            item.get("key", ""): item.get("effect_type", item.get("key", ""))
+            for item in schema.get("label_definitions", [])
+            if isinstance(item, dict) and item.get("key")
+        } if label_path.is_file() else {}
+
         runtime = cls(
             model=model,
             labels=labels,
+            effect_map=effect_map,
             temperature=temperature,
             thresholds=thresholds,
             model_version_id=model_version_id,
@@ -123,7 +136,7 @@ class ModelRuntime:
         thresholds = self.thresholds.with_overrides(threshold_overrides)
         probs = self.calibrated_probs([model_input])[0]
         prob_map = {label: float(p) for label, p in zip(self.labels, probs, strict=True)}
-        result = decide(prob_map, thresholds).to_dict()
+        result = decide(prob_map, thresholds, self.effect_map).to_dict()
         latency_ms = round((time.perf_counter() - start) * 1000, 2)
         result["model_version_id"] = self.model_version_id
         result["latency_ms"] = latency_ms

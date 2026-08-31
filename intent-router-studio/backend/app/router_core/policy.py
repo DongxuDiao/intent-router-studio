@@ -8,7 +8,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-from app.router_core.taxonomy import EFFECT_CEILING, REQUIRED_NEXT_GATE
+from app.router_core.system_effects import (
+    EFFECT_CEILING,
+    REQUIRED_NEXT_GATE,
+    effect_ceiling_for,
+    required_gate_for,
+)
 
 # 冷启动默认阈值（仅用于首次实验；正式阈值必须来自 validation 搜索）
 DEFAULT_THRESHOLDS = {
@@ -69,7 +74,14 @@ def _label_threshold(label: str, thresholds: Thresholds) -> float:
     return thresholds.default_min_confidence
 
 
-def decide(probabilities: dict[str, float], thresholds: Thresholds) -> PolicyResult:
+def decide(
+    probabilities: dict[str, float],
+    thresholds: Thresholds,
+    effect_type_for: dict[str, str] | None = None,
+) -> PolicyResult:
+    """effect_type_for：标签→系统效果类型映射（自定义意图标签 §6.8）。
+    缺省按标签本身查表（五分类恒等）；未知效果 fail closed（ceiling=none、
+    gate=clarification），effect 只能由服务端解析。"""
     """对单个样本的概率分布执行确定性决策门。
 
     probabilities: label -> 概率（应使用校准后的概率）
@@ -110,6 +122,7 @@ def decide(probabilities: dict[str, float], thresholds: Thresholds) -> PolicyRes
     }.get(top1_label, "DEFAULT")
     reason_codes = [f"{prefix}_THRESHOLD_PASSED", "MARGIN_PASSED"]
 
+    effect = (effect_type_for or {}).get(top1_label, top1_label)
     return PolicyResult(
         route=top1_label,
         decision="accept",
@@ -117,8 +130,8 @@ def decide(probabilities: dict[str, float], thresholds: Thresholds) -> PolicyRes
         margin=round(margin, 6),
         top_k=top_k,
         reason_codes=reason_codes,
-        effect_ceiling=EFFECT_CEILING[top1_label],
-        required_next_gate=REQUIRED_NEXT_GATE[top1_label],
+        effect_ceiling=effect_ceiling_for(effect),
+        required_next_gate=required_gate_for(effect),
     )
 
 

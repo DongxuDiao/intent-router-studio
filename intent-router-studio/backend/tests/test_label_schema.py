@@ -14,7 +14,6 @@ import io
 
 import pandas as pd
 import pytest
-from pydantic import ValidationError
 
 from app.errors import ApiError
 from app.router_core.taxonomy import LABELS, ensure_label_schema
@@ -42,8 +41,15 @@ def test_intent_label_literal_matches_labels():
     ],
 )
 def test_illegal_label_rejected_at_schema(model, kw):
-    with pytest.raises(ValidationError):
-        model(**kw)
+    """自定义意图标签 §6.3：入口 Literal 收窄已移除，schema 层接受任意
+    1~64 字符串；非法标签的拒绝移至服务层按项目 Schema 校验
+    （见 test_dynamic_labels_e2e）。pydantic 仍拒绝空串/超长。"""
+    assert model(**kw) is not None  # 原"非法"样本现为合法字符串输入
+    from pydantic import ValidationError as VE
+
+    field = "label" if "label" in kw else "default_label" if "default_label" in kw else "expected_label"
+    with pytest.raises(VE):
+        model(**{**kw, field: ""})
 
 
 def test_legal_labels_accepted_at_schema():
