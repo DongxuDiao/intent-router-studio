@@ -132,6 +132,18 @@ def test_glm_thinking_enabled_omits_flag():
     assert "thinking" not in json.loads(capture[0].content)
 
 
+def test_glm_53_flash_forces_thinking_enabled():
+    capture: list[httpx.Request] = []
+    handler, _ = _handler([_success_body()], capture)
+    provider = _glm(
+        httpx.MockTransport(handler),
+        model_id="glm-5.3-flash",
+        generation_config={"thinking": False},
+    )
+    provider.rewrite("q", None, None, 3000)
+    assert json.loads(capture[0].content)["thinking"] == {"type": "enabled"}
+
+
 def test_openai_compatible_json_mode_off():
     capture: list[httpx.Request] = []
     handler, _ = _handler([_success_body()], capture)

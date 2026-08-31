@@ -45,10 +45,12 @@ const BUILTIN_ID = 'builtin:local_qwen'
 const GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
 /** 智谱 Chat Completions 官方模型代码；AutoComplete 仍允许输入后续新增模型。 */
 const GLM_MODEL_OPTIONS = [
-  'glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.7-flash',
+  'glm-5.3-flash', 'glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.7-flash',
   'glm-4.7-flashx', 'glm-4.6', 'glm-4.5-air', 'glm-4.5-airx', 'glm-4.5-flash',
   'glm-4-flash-250414', 'glm-4-flashx-250414',
 ].map((value) => ({ value }))
+
+const requiresThinking = (modelId: string) => modelId.trim().toLowerCase() === 'glm-5.3-flash'
 
 const TYPE_NAMES: Record<string, string> = {
   local_qwen: '本地 Qwen',
@@ -100,7 +102,7 @@ function draftFrom(c: ProviderConnection): ConnDraft {
     api_key: '',
     temperature: typeof gc.temperature === 'number' ? gc.temperature : 0.1,
     max_tokens: typeof gc.max_tokens === 'number' ? gc.max_tokens : 256,
-    thinking_disabled: gc.thinking !== true,
+    thinking_disabled: requiresThinking(c.model_id ?? '') ? false : gc.thinking !== true,
     json_mode: gc.json_mode !== false,
     egress: true,
   }
@@ -660,7 +662,11 @@ export default function RewriteSettings() {
                 style={{ width: '100%' }}
                 value={connDraft.model_id}
                 options={GLM_MODEL_OPTIONS}
-                onChange={(model_id) => setConnDraft({ ...connDraft, model_id })}
+                onChange={(model_id) => setConnDraft({
+                  ...connDraft,
+                  model_id,
+                  thinking_disabled: requiresThinking(model_id) ? false : connDraft.thinking_disabled,
+                })}
                 placeholder="如 glm-5.2 或 glm-4.5-flash"
                 filterOption={(input, option) => String(option?.value ?? '').includes(input.toLowerCase())}
               />
@@ -709,9 +715,14 @@ export default function RewriteSettings() {
               <Switch
                 size="small"
                 checked={connDraft.thinking_disabled}
+                disabled={requiresThinking(connDraft.model_id)}
                 onChange={(v) => setConnDraft({ ...connDraft, thinking_disabled: v })}
               />{' '}
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>关闭 Thinking（GLM-4.5+ 默认开思考，改写任务建议关闭）</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {requiresThinking(connDraft.model_id)
+                  ? 'GLM-5.3-Flash 为始终思考模型，不支持关闭 Thinking'
+                  : '关闭 Thinking（GLM-4.5+ 默认开思考，改写任务建议关闭）'}
+              </Typography.Text>
             </span>
             <span>
               <Switch

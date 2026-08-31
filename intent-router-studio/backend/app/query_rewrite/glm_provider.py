@@ -39,6 +39,12 @@ class GlmProvider(OpenAICompatibleProvider):
 
     def _build_payload(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         payload = super()._build_payload(messages)
+        # GLM-5.3-Flash 是始终思考模型，传 disabled 会返回 1210：
+        # “该模型始终思考，不支持关闭思考”。即使旧连接保存了 thinking=false，
+        # Provider 也必须按模型能力纠正请求。
+        if self.model_id.lower() == "glm-5.3-flash":
+            payload["thinking"] = {"type": "enabled"}
+            return payload
         # GLM-4.5+ 默认可能开启 Thinking；Query 改写是短结构化任务，必须显式关闭。
         # thinking=true 时省略字段，交由模型默认行为。
         if not self.config.thinking:
