@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -175,3 +176,33 @@ def test_registry_detects_delete_without_listener(db, connection):
     with pytest.raises(ProviderUnavailable):
         registry.resolve(connection.id)
     assert cached.closed
+
+
+def test_concurrent_newer_revision_wins_and_loser_is_closed(db, connection, monkeypatch):
+    """旧 revision 构造期间新 revision 已进入缓存时，不得反向淘汰新实例。"""
+    registry = ProviderRegistry(StubProvider())
+
+    def racing_build(row):
+        stale = _FakeRemote(row)
+        # 模拟另一进程刚提交 rev2，另一解析线程已先完成构造并写入缓存。
+        db.query(RewriteProviderConnection).filter(
+            RewriteProviderConnection.id == connection.id
+        ).update({"revision": 2, "model_id": "glm-5-air"})
+        db.commit()
+        fresh = _FakeRemote(SimpleNamespace(
+            id=connection.id, revision=2, model_id="glm-5-air",
+        ))
+        with registry._lock:
+            registry._cache[(connection.id, 2)] = fresh
+        return stale
+
+    monkeypatch.setattr(svc, "_build_remote_provider", racing_build)
+    resolved = registry.resolve(connection.id)
+
+    assert resolved.connection_revision == 2
+    assert resolved.model_id == "glm-5-air"
+    assert _FakeRemote.built[0].closed  # 未采用的 rev1 必须立即释放连接池
+    assert not resolved.closed
+    assert registry.snapshot()["cached_remote_providers"] == [
+        {"connection_id": connection.id, "revision": 2}
+    ]

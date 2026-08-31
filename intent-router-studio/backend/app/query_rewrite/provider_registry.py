@@ -65,20 +65,32 @@ class ProviderRegistry:
                 raise ProviderUnavailable(f"连接没有 API Key: {connection_id}")
             key = (connection_id, row.revision)
             with self._lock:
+                # 构造发生在锁外：本线程读到旧 revision 后，另一线程可能已
+                # 缓存更新 revision。任何情况下都不能让旧实例反向淘汰新实例。
+                newer = [(k, p) for k, p in self._cache.items() if k[0] == connection_id and k[1] > key[1]]
+                if newer:
+                    newest_key, newest = max(newer, key=lambda item: item[0][1])
+                    return newest_key, newest
                 cached = self._cache.get(key)
                 if cached is not None:
-                    # 同连接旧 revision 的残留实例一并淘汰
-                    for stale in [k for k in self._cache if k[0] == connection_id and k != key]:
+                    # 只淘汰更旧 revision；绝不关闭并发产生的更新 revision。
+                    for stale in [k for k in self._cache if k[0] == connection_id and k[1] < key[1]]:
                         self._close_quietly(self._cache.pop(stale))
                     return key, cached
             # 构造（解密）在锁外进行，锁内只做缓存写
             provider = svc._build_remote_provider(row)
             with self._lock:
+                newer = [(k, p) for k, p in self._cache.items() if k[0] == connection_id and k[1] > key[1]]
+                if newer:
+                    newest_key, newest = max(newer, key=lambda item: item[0][1])
+                    self._close_quietly(provider)
+                    return newest_key, newest
                 raced = self._cache.get(key)
                 if raced is not None:
+                    self._close_quietly(provider)
                     return key, raced
                 self._cache[key] = provider
-                for stale in [k for k in self._cache if k[0] == connection_id and k != key]:
+                for stale in [k for k in self._cache if k[0] == connection_id and k[1] < key[1]]:
                     self._close_quietly(self._cache.pop(stale))
                 while len(self._cache) > MAX_CACHED_PROVIDERS:
                     _, evicted = self._cache.popitem(last=False)

@@ -460,6 +460,7 @@ def test_connection(db: Session, connection_id: str) -> dict[str, Any]:
     cfg = GenerationConfig(**(row.generation_config or {}))
     test_timeout_ms = min(120_000, max(15_000, cfg.read_timeout_ms + 1_000))
     started = time.perf_counter()
+    provider = None
     try:
         provider = _build_remote_provider(row)
         reply = provider.rewrite(TEST_PROBE_QUERY, TEST_PROBE_CONTEXT, None, timeout_ms=test_timeout_ms)
@@ -497,6 +498,14 @@ def test_connection(db: Session, connection_id: str) -> dict[str, Any]:
             _log_safe({"id": row.id, "code": code, "latency_ms": latency_ms, "exc": type(exc).__name__}),
         )
         return {"status": "FAILED", "error_code": code, "latency_ms": latency_ms, "message": str(exc)[:200]}
+    finally:
+        if provider is not None:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.exception("测试连接结束后关闭 Provider 失败 id=%s", row.id)
 
 
 # ---------------------------------------------------------------- 变更通知（阶段3 registry 挂钩）

@@ -210,9 +210,15 @@ def test_clear_credential_requires_confirm(db, client):
 # ---------------------------------------------------------------- 显式测试
 
 def _set_test_status(client, connection_id, monkeypatch, ok: bool):
+    instances = []
+
     class _Fake:
         provider_name = "glm"
         model_id = "glm-5.2"
+
+        def __init__(self):
+            self.closed = False
+            instances.append(self)
 
         def rewrite(self, q, c, t=None, timeout_ms=5000):
             from app.query_rewrite.provider import ProviderAuthError, ProviderReply
@@ -226,9 +232,13 @@ def _set_test_status(client, connection_id, monkeypatch, ok: bool):
                 request_id="req_fake", usage=None, connection_id=connection_id, connection_revision=1,
             )
 
+        def close(self):
+            self.closed = True
+
     monkeypatch.setattr(svc, "_build_remote_provider", lambda row: _Fake())
     resp = client.post(f"/api/v1/rewrite/provider-connections/{connection_id}/test")
     assert resp.status_code == 200, resp.text
+    assert len(instances) == 1 and instances[0].closed
     return resp.json()
 
 
