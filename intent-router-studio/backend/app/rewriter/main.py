@@ -143,11 +143,14 @@ def build_rewriter_app(provider: RewriteProvider, warmup: bool = True) -> FastAP
 
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request, exc: RequestValidationError):
+        import json as _json
+
         from fastapi.responses import JSONResponse as _JR
 
+        errors = _json.loads(_json.dumps(exc.errors(), default=str))[:10]
         return _JR(
             status_code=422,
-            content={"error": {"code": "VALIDATION_ERROR", "message": "请求参数校验失败", "details": {"errors": exc.errors()[:10]}, "request_id": "-"}},
+            content={"error": {"code": "VALIDATION_ERROR", "message": "请求参数校验失败", "details": {"errors": errors}, "request_id": "-"}},
         )
 
     if warmup and getattr(provider, "warmup", None) is not None and mp.current_process().name == "MainProcess":

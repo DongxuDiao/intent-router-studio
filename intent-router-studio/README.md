@@ -87,7 +87,7 @@ python3 scripts/eval_rewrite.py --project <ID> --provider-connection rpc_xxx
 ```
 
 - API Key 以 AES-256-GCM 加密落库（AAD 绑定连接与 revision），接口/日志/前端只出 `****末4位`；轮换主密钥用 `python -m app.cli.rotate_rewrite_master_key`（单事务，失败整体回滚）；
-- GLM 经官方 `zai-sdk` 调用，端点固定官方通用开放平台地址（`thinking` 按模型能力设置——常规模型默认关闭，始终思考模型如 `glm-5.3-flash` 强制开启；JSON mode 开启、`stream=false`；SDK 自带重试关闭，重试与总超时由 Provider 统一管理）；自定义 OpenAI 兼容端点只允许 https 公网地址（SSRF 校验：拒绝私网/回环/metadata，请求前二次解析防 DNS rebinding）；
+- GLM 经官方 `zai-sdk` 调用，端点档位二选一：通用开放平台（按量计费）/ Coding Plan 专用端点（消耗订阅额度；官方条款限编码工具使用，接入属灰色地带、可能被拒，不伪装工具特征）；`thinking` 按模型能力设置——常规模型默认关闭，始终思考模型如 `glm-5.3-flash` 强制开启；JSON mode 开启、`stream=false`；SDK 自带重试关闭，重试与总超时由 Provider 统一管理。自定义 OpenAI 兼容端点只允许 https 公网地址（SSRF 校验：拒绝私网/回环/metadata，请求前二次解析防 DNS rebinding）；
 - 失败语义：超时/限流/鉴权失败/非法 JSON 一律回退原文，`/predict` 永不 5xx；熔断按连接隔离，一个坏 Key 不影响本地 Qwen；429 只进短暂限流窗口不计故障；
 - 切换模型、更新连接（revision +1）后缓存键自动隔离，旧改写不复用。
 

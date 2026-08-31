@@ -126,12 +126,23 @@ describe('改写模型连接（V1 §9）', () => {
     expect(JSON.stringify(localStorage)).not.toContain(SECRET)
   })
 
-  it('GLM 预设锁定官方 Base URL；openai_compatible 可编辑', async () => {
+  it('GLM 用端点档位选择（无自由 URL 输入）；coding 档显示条款警示', async () => {
     renderPage()
     await openDrawer()
-    const glmInput = screen.getByDisplayValue('https://open.bigmodel.cn/api/paas/v4') as HTMLInputElement
-    expect(glmInput.disabled).toBe(true)
-    // 切到 openai_compatible：URL 可编辑
+    // GLM：不出现自由 URL 输入框，展示端点选择器与通用端点地址
+    expect(screen.queryByPlaceholderText('https://api.example.com/v1')).toBeNull()
+    expect(screen.getByText(/端点档位/)).toBeInTheDocument()
+    expect(screen.getByText(/端点：https:\/\/open\.bigmodel\.cn\/api\/paas\/v4/)).toBeInTheDocument()
+    // 切到 coding：显示官方条款警示
+    fireEvent.mouseDown(screen.getByText('通用开放平台（按量计费，消耗 API 余额）').closest('.ant-select-selector')!)
+    const coding = await waitFor(() => screen.getByText('Coding Plan 专用端点（消耗订阅额度）'))
+    fireEvent.click(coding)
+    expect(await screen.findByText('Coding Plan 官方条款仅限指定编码工具使用')).toBeInTheDocument()
+  })
+
+  it('openai_compatible 才有可编辑 Base URL', async () => {
+    renderPage()
+    await openDrawer()
     fireEvent.mouseDown(screen.getByText('智谱 GLM（官方端点）').closest('.ant-select-selector')!)
     const option = await waitFor(() => screen.getByText('OpenAI 兼容 API（自定义 Base URL）'))
     fireEvent.click(option)

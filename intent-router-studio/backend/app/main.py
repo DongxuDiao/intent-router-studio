@@ -179,9 +179,12 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
+        # 本版 FastAPI 的 RequestValidationError 无 .json()；errors() 的 ctx
+        # 可能含异常对象，default=str 兜底保证可序列化
+        errors = json.loads(json.dumps(exc.errors(), default=str))[:20]
         return JSONResponse(
             status_code=422,
-            content=_error_body("VALIDATION_ERROR", "请求参数校验失败", {"errors": json.loads(exc.json())[:20]}),
+            content=_error_body("VALIDATION_ERROR", "请求参数校验失败", {"errors": errors}),
         )
 
     @app.exception_handler(StarletteHTTPException)

@@ -284,3 +284,76 @@ def test_no_secret_leakage_in_any_response(db, client, monkeypatch):
         assert KEY not in text
         assert (row.api_key_ciphertext or "") not in text
         assert "authorization" not in text.lower()
+
+
+# ---------------------------------------------------------------- GLM 端点档位
+
+def test_create_glm_coding_endpoint(db, client):
+    created = _create(client, glm_endpoint="coding")
+    assert created["base_url"] == "https://open.bigmodel.cn/api/coding/paas/v4"
+    assert created["glm_endpoint"] == "coding"
+    # 缺省仍是通用端点
+    default = _create(client)
+    assert default["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
+    assert default["glm_endpoint"] == "general"
+
+
+def test_create_glm_rejects_unknown_endpoint(db, client):
+    resp = client.post(
+        "/api/v1/rewrite/provider-connections",
+        json=_glm_payload(glm_endpoint="custom"),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert any("glm_endpoint" in str(e.get("loc", [])) for e in resp.json()["error"]["details"]["errors"])
+    # 服务层：绕过 pydantic 直调仍有白名单兜底
+    with pytest.raises(Exception) as exc:
+        svc.create_connection(db, _glm_payload(glm_endpoint="custom"))
+    assert "glm_endpoint" in str(exc.value)
+
+
+def test_patch_glm_endpoint_bumps_revision(db, client):
+    created = _create(client)
+    resp = client.patch(
+        f"/api/v1/rewrite/provider-connections/{created['id']}",
+        json={"glm_endpoint": "coding"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["base_url"].endswith("/coding/paas/v4")
+    assert resp.json()["revision"] == 2  # 端点变化影响输出 → 版本升级 + 缓存隔离
+    # 切回通用端点
+    resp = client.patch(
+        f"/api/v1/rewrite/provider-connections/{created['id']}",
+        json={"glm_endpoint": "general"},
+    )
+    assert resp.json()["glm_endpoint"] == "general" and resp.json()["revision"] == 3
+
+
+def test_patch_glm_raw_base_url_still_rejected(db, client):
+    created = _create(client, glm_endpoint="coding")
+    resp = client.patch(
+        f"/api/v1/rewrite/provider-connections/{created['id']}",
+        json={"base_url": "https://evil.example.com/v1"},
+    )
+    assert resp.status_code == 422  # 任意 URL 一律走 openai_compatible
+
+
+def test_glm_provider_posts_to_coding_endpoint():
+    """GlmProvider 按连接地址实际请求 Coding 端点（官方白名单内地址生效）。"""
+    import httpx
+
+    from app.query_rewrite.glm_provider import GLM_CODING_BASE_URL, GlmProvider
+    from tests.test_glm_provider import _handler, _success_body
+
+    capture: list[httpx.Request] = []
+    handler, _ = _handler([_success_body()], capture)
+    provider = GlmProvider(
+        connection_id="rpc_coding", revision=1,
+        base_url=GLM_CODING_BASE_URL + "/",  # 带尾斜杠也应规范化
+        model_id="glm-5.2", api_key="test-key-1234",
+        transport=httpx.MockTransport(handler),
+    )
+    reply = provider.rewrite("q", None, None, 3000)
+    assert str(capture[0].url).startswith(GLM_CODING_BASE_URL)
+    assert capture[0].url.path.endswith("/chat/completions")
+    assert reply.provider == "glm"

@@ -31,6 +31,11 @@ from app.query_rewrite.provider import (
 from app.query_rewrite.remote_provider import MAX_RESPONSE_BYTES, OpenAICompatibleProvider, _quota_like
 
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+# Coding Plan 专用端点（订阅额度；官方条款限编码工具使用，接入本产品属
+# 灰色地带——如实以本产品身份调用，被服务端拒绝时按业务码提示）
+GLM_CODING_BASE_URL = "https://open.bigmodel.cn/api/coding/paas/v4"
+# GLM 只允许这两个官方地址；任意 URL 一律走 openai_compatible 类型
+_GLM_ALLOWED_BASE_URLS = {GLM_BASE_URL, GLM_CODING_BASE_URL}
 
 # 智谱业务错误码 → 错误类别（V1 §4.3 表）
 _GLM_INVALID_CODES = {"1210", "1211", "1212", "1213", "1214", "1215", "1261", "1301"}
@@ -45,14 +50,16 @@ class GlmProvider(OpenAICompatibleProvider):
     provider_name = "glm"
 
     def __init__(self, **kwargs: Any) -> None:
-        # GLM 类型连接的 base_url 由后端固定为官方端点，忽略调用方传入值
-        kwargs["base_url"] = GLM_BASE_URL
+        # GLM 的 base_url 限定官方两个端点（通用 / Coding Plan），
+        # 传入其他值一律回落通用端点
+        requested = str(kwargs.get("base_url") or GLM_BASE_URL).rstrip("/")
+        kwargs["base_url"] = requested if requested in _GLM_ALLOWED_BASE_URLS else GLM_BASE_URL
         super().__init__(**kwargs)
         # 传入现有受控 httpx.Client，保留连接池、禁止重定向和测试用
         # MockTransport；SDK 内部重试关闭，由 Provider 的总预算重试统一管理。
         self._zhipu = ZhipuAiClient(
             api_key=self._api_key,
-            base_url=GLM_BASE_URL,
+            base_url=self.base_url,
             max_retries=0,
             http_client=self._http,
             source_channel="intent-router-studio",

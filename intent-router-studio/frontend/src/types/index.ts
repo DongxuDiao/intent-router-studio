@@ -518,6 +518,8 @@ export interface ProviderConnection {
   name: string
   provider_type: 'local_qwen' | 'glm' | 'openai_compatible' | string
   base_url?: string | null
+  /** GLM 端点档位：general=通用开放平台（按量计费）／coding=Coding Plan 专用（订阅额度） */
+  glm_endpoint?: 'general' | 'coding' | null
   model_id: string | null
   api_key_hint?: string
   has_api_key?: boolean

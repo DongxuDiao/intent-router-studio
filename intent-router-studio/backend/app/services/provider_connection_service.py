@@ -18,7 +18,7 @@ from app.errors import ApiError, ConflictError, NotFoundError
 from app.models import RewriteConfigVersion, RewriteProviderConnection
 from app.models.tables import utcnow
 from app.query_rewrite import credentials
-from app.query_rewrite.glm_provider import GLM_BASE_URL
+from app.query_rewrite.glm_provider import GLM_BASE_URL, GLM_CODING_BASE_URL
 from app.query_rewrite.net_guard import validate_provider_base_url
 from app.query_rewrite.remote_provider import GenerationConfig
 
@@ -27,6 +27,10 @@ logger = logging.getLogger("app.provider_connections")
 BUILTIN_LOCAL_QWEN = "builtin:local_qwen"
 BUILTIN_LOCAL_NAME = "本地 Qwen3-0.6B"
 VALID_PROVIDER_TYPES = ("glm", "openai_compatible")
+
+# GLM 端点档位：general=通用开放平台（按量计费）／coding=Coding Plan 专用
+# （订阅额度，官方条款限编码工具使用）。地址由后端映射锁定，不接受任意 URL。
+GLM_ENDPOINTS = {"general": GLM_BASE_URL, "coding": GLM_CODING_BASE_URL}
 
 # 测试连接固定探针（V1 §7.1）：覆盖指代补全 + JSON mode + 阈值解析
 TEST_PROBE_QUERY = "这个怎么停？"
@@ -55,7 +59,7 @@ def _build_remote_provider(row: RewriteProviderConnection) -> Any:
         "generation_config": row.generation_config or {},
     }
     if row.provider_type == "glm":
-        return GlmProvider(base_url=GLM_BASE_URL, **common)
+        return GlmProvider(base_url=row.base_url or GLM_BASE_URL, **common)
     transport = ValidatingTransport(allow_private=_allow_private_urls())
     return OpenAICompatibleProvider(base_url=row.base_url, transport=transport, **common)
 
@@ -99,6 +103,7 @@ def _to_dict(row: RewriteProviderConnection, in_use: int) -> dict[str, Any]:
         "name": row.name,
         "provider_type": row.provider_type,
         "base_url": row.base_url,
+        "glm_endpoint": ("coding" if row.base_url == GLM_CODING_BASE_URL else "general") if row.provider_type == "glm" else None,
         "model_id": row.model_id,
         "api_key_hint": row.api_key_hint,
         "has_api_key": bool(row.api_key_ciphertext),
@@ -259,9 +264,12 @@ def create_connection(db: Session, payload: dict[str, Any]) -> RewriteProviderCo
     if len(api_key) < 8:
         raise ApiError("VALIDATION_ERROR", "api_key 过短", 422)
 
-    # GLM 的 Base URL 由后端固定为官方端点；自定义 URL 走 openai_compatible
+    # GLM 的 Base URL 由后端按端点档位映射官方地址；自定义 URL 走 openai_compatible
     if provider_type == "glm":
-        base_url = GLM_BASE_URL
+        endpoint = str(payload.get("glm_endpoint") or "general")
+        if endpoint not in GLM_ENDPOINTS:
+            raise ApiError("VALIDATION_ERROR", f"glm_endpoint 必须是 {'/'.join(GLM_ENDPOINTS)} 之一", 422)
+        base_url = GLM_ENDPOINTS[endpoint]
     else:
         base_url = validate_provider_base_url(str(payload.get("base_url") or ""))
         if not base_url:
@@ -324,8 +332,18 @@ def update_connection(db: Session, connection_id: str, payload: dict[str, Any]) 
     base_url = payload.get("base_url")
     if base_url is not None:
         if row.provider_type == "glm":
-            raise ApiError("VALIDATION_ERROR", "GLM 连接的 Base URL 固定为官方端点，不可修改", 422)
+            raise ApiError("VALIDATION_ERROR", "GLM 连接的地址请通过 glm_endpoint 切换端点档位", 422)
         new_url = validate_provider_base_url(str(base_url))
+        if new_url != row.base_url:
+            row.base_url = new_url
+            affects_output = True
+
+    glm_endpoint = payload.get("glm_endpoint")
+    if glm_endpoint is not None and row.provider_type == "glm":
+        endpoint = str(glm_endpoint)
+        if endpoint not in GLM_ENDPOINTS:
+            raise ApiError("VALIDATION_ERROR", f"glm_endpoint 必须是 {'/'.join(GLM_ENDPOINTS)} 之一", 422)
+        new_url = GLM_ENDPOINTS[endpoint]
         if new_url != row.base_url:
             row.base_url = new_url
             affects_output = True

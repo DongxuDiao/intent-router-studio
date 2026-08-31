@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -18,7 +20,8 @@ class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     provider_type: str  # glm | openai_compatible
     model_id: str = Field(min_length=1, max_length=200)
-    base_url: str | None = None  # openai_compatible 必填；GLM 固定
+    base_url: str | None = None  # openai_compatible 必填；GLM 由 glm_endpoint 映射
+    glm_endpoint: Literal["general", "coding"] | None = None  # GLM 端点档位，默认 general
     api_key: str = Field(min_length=8, max_length=2000)
     generation_config: dict | None = None
     egress_acknowledged: bool
@@ -28,6 +31,7 @@ class ConnectionPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     model_id: str | None = Field(default=None, min_length=1, max_length=200)
     base_url: str | None = None
+    glm_endpoint: Literal["general", "coding"] | None = None
     generation_config: dict | None = None
     enabled: bool | None = None
     # 空字符串 = 保留旧值（服务层判断）；非空时长度 ≥8 由服务层校验

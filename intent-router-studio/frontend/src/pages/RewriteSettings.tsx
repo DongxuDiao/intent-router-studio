@@ -62,6 +62,8 @@ const TYPE_NAMES: Record<string, string> = {
 interface ConnDraft {
   name: string
   provider_type: 'glm' | 'openai_compatible'
+  /** GLM 端点档位：地址由后端映射锁定，不接受任意 URL */
+  glm_endpoint: 'general' | 'coding'
   base_url: string
   model_id: string
   api_key: string
@@ -81,6 +83,7 @@ function emptyDraft(type: 'glm' | 'openai_compatible' = 'glm'): ConnDraft {
   return {
     name: '',
     provider_type: type,
+    glm_endpoint: 'general',
     base_url: type === 'glm' ? GLM_BASE_URL : '',
     model_id: type === 'glm' ? 'glm-5.2' : '',
     api_key: '',
@@ -97,6 +100,7 @@ function draftFrom(c: ProviderConnection): ConnDraft {
   return {
     name: c.name,
     provider_type: (c.provider_type === 'openai_compatible' ? 'openai_compatible' : 'glm'),
+    glm_endpoint: c.glm_endpoint === 'coding' ? 'coding' : 'general',
     base_url: c.base_url ?? '',
     model_id: c.model_id ?? '',
     api_key: '',
@@ -462,7 +466,17 @@ export default function RewriteSettings() {
                     </Space>
                   ),
                 },
-                { title: '类型', dataIndex: 'provider_type', width: 110, render: (t: string) => TYPE_NAMES[t] ?? t },
+                {
+                  title: '类型', dataIndex: 'provider_type', width: 150,
+                  render: (t: string, c) => (
+                    <Space size={4}>
+                      <span>{TYPE_NAMES[t] ?? t}</span>
+                      {t === 'glm' && c.glm_endpoint === 'coding' && (
+                        <Tag color="purple" style={{ fontSize: 10 }}>Coding</Tag>
+                      )}
+                    </Space>
+                  ),
+                },
                 { title: '模型', dataIndex: 'model_id', width: 130, ellipsis: true },
                 {
                   title: '密钥', width: 90,
@@ -642,17 +656,42 @@ export default function RewriteSettings() {
               maxLength={100}
             />
           </div>
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              Base URL{connDraft.provider_type === 'glm' ? '（GLM 固定官方端点，不可修改）' : '（仅允许 https 公网地址）'}
-            </Typography.Text>
-            <Input
-              value={connDraft.provider_type === 'glm' ? GLM_BASE_URL : connDraft.base_url}
-              disabled={connDraft.provider_type === 'glm'}
-              onChange={(e) => setConnDraft({ ...connDraft, base_url: e.target.value })}
-              placeholder={connDraft.provider_type === 'glm' ? GLM_BASE_URL : 'https://api.example.com/v1'}
-            />
-          </div>
+          {connDraft.provider_type === 'glm' ? (
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>端点档位（地址由后端锁定，不可自定义）</Typography.Text>
+              <Select
+                style={{ width: '100%' }}
+                value={connDraft.glm_endpoint}
+                onChange={(v) => setConnDraft({ ...connDraft, glm_endpoint: v })}
+                options={[
+                  { value: 'general', label: '通用开放平台（按量计费，消耗 API 余额）' },
+                  { value: 'coding', label: 'Coding Plan 专用端点（消耗订阅额度）' },
+                ]}
+              />
+              {connDraft.glm_endpoint === 'coding' ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 8 }}
+                  message="Coding Plan 官方条款仅限指定编码工具使用"
+                  description="本产品以自身身份如实调用该端点（不伪装工具特征）。若被服务端拒绝会显示对应业务码；订阅额度与 API 余额互不通用。"
+                />
+              ) : (
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                  端点：{GLM_BASE_URL}
+                </Typography.Text>
+              )}
+            </div>
+          ) : (
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>Base URL（仅允许 https 公网地址）</Typography.Text>
+              <Input
+                value={connDraft.base_url}
+                onChange={(e) => setConnDraft({ ...connDraft, base_url: e.target.value })}
+                placeholder="https://api.example.com/v1"
+              />
+            </div>
+          )}
           <div>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               Model ID{connDraft.provider_type === 'glm' ? '（请选择官方代码，也可输入新模型）' : ''}
