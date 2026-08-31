@@ -34,6 +34,8 @@ services:
       # Query 改写（修改方案 §4/§9.4）：默认 shadow，rewriter 独立容器
       REWRITER_URL: http://rewriter:8010
       REWRITE_TIMEOUT_MS: "90000"
+      # 外部模型 V1 §6.3：API 进程负责密钥加解密（创建/更新/测试），主密钥来自 .env
+      REWRITE_CREDENTIAL_MASTER_KEY: ${REWRITE_CREDENTIAL_MASTER_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
       interval: 15s
@@ -78,6 +80,14 @@ services:
     environment:
       APP_ENV: production
       HF_HOME: /data/var/hf-cache
+      # 直连 huggingface.co 的元数据检查在部分网络下 SSL 中断会导致缓存命中失败，
+      # 与 npm/pip/apt 一致走国内镜像（本地缓存命中时不发起网络请求）
+      HF_ENDPOINT: https://hf-mirror.com
+      # 外部模型 V1 §7.3：rewriter 经共享只读数据库解析连接（主 API 永不下发解密 Key）
+      DATABASE_URL: sqlite:////data/var/app.db
+      ARTIFACT_ROOT: /data/var
+      # 凭据主密钥：来自未入库的 .env 或部署 Secret；未配置时仅本地 Qwen 可用
+      REWRITE_CREDENTIAL_MASTER_KEY: ${REWRITE_CREDENTIAL_MASTER_KEY:-}
       REWRITE_PROVIDER: local_qwen
       REWRITE_MODEL_ID: Qwen/Qwen3-0.6B
       REWRITE_DEVICE: auto

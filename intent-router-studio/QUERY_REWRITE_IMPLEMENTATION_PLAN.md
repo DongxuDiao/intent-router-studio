@@ -1153,3 +1153,17 @@ frontend/src/api/client.ts
 7. 默认 `shadow`，不修改现有 `/predict`。
 
 完成 100–300 条高风险人工评测后，再决定是否建设项目术语、safe_apply、反馈库和模型微调。
+
+---
+
+## 附录：外部模型 Provider V1 已落地（2026-08）
+
+「Query 改写接入外部模型 API」V1（智谱 GLM 重点接入）已实现并全量测试通过，与本文档的安全边界完全兼容：
+
+- **生成来源扩展**：`builtin:local_qwen`（默认，行为不变）/ 智谱 GLM（官方端点固定）/ OpenAI 兼容 API（自定义 https 公网地址，SSRF 全量校验）；
+- **连接与密钥**：`rewrite_provider_connections` 表 + AES-256-GCM 凭据（主密钥 `REWRITE_CREDENTIAL_MASTER_KEY`，AAD 绑定连接与 revision）；密钥只写不读，轮换 CLI 单事务整体回滚；
+- **项目选择**：`RewriteConfigVersion.provider_connection_id` 版本化（默认 builtin，旧配置读取自动补默认）；保存校验连接存在/启用/已确认外发；
+- **缓存与熔断**：缓存键加入连接/revision/模型/生成参数指纹；熔断按连接隔离，持久错误（鉴权/欠费）标记 unhealthy，429 只进短暂限流窗口；
+- **失败语义不变**：任何外部 API 失败回退原文，`final_route` 恒为原文路由，`/predict` 永不 5xx。
+
+验收指标中依赖真实 GLM Key 的项（成功率、P95、非法 JSON 率、费用）需按 §13 阶段 5 用 `scripts/eval_rewrite.py --provider-connection` 在目标环境实测。

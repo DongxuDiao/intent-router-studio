@@ -71,6 +71,26 @@ Query 改写用于把口语表达、术语别名和上下文指代整理成更�
 
 无论使用哪种模式，`final_route` 永远来自原始 Query。`safe_apply` 也只能改变送往下游检索的文本，不能改变动作分类、效果上限或确认要求。当前建议保持 `shadow`；详见 [Query 改写落地方案](QUERY_REWRITE_IMPLEMENTATION_PLAN.md)。
 
+### 外部改写模型（智谱 GLM / OpenAI 兼容 API）
+
+生成模型除内置本地 Qwen 外，可在 Web「改写设置 → 改写模型连接」接入外部 API 并按项目选择：
+
+```bash
+# 1. 生成并配置凭据主密钥（只经未入库的 .env 注入，不入 Git/compose）
+python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+#    写入 intent-router-studio/.env: REWRITE_CREDENTIAL_MASTER_KEY=...
+docker compose up -d   # rewriter 自动读取该密钥与共享数据库
+
+# 2. Web 后台：新建 GLM 连接 → 粘贴 API Key → 保存并测试 → 项目选择该连接
+# 3. 评测对比本地 Qwen 与 GLM：
+python3 scripts/eval_rewrite.py --project <ID> --provider-connection rpc_xxx
+```
+
+- API Key 以 AES-256-GCM 加密落库（AAD 绑定连接与 revision），接口/日志/前端只出 `****末4位`；轮换主密钥用 `python -m app.cli.rotate_rewrite_master_key`（单事务，失败整体回滚）；
+- GLM 端点固定官方通用开放平台地址（`thinking` 显式关闭、JSON mode 开启、`stream=false`）；自定义 OpenAI 兼容端点只允许 https 公网地址（SSRF 校验：拒绝私网/回环/metadata，请求前二次解析防 DNS rebinding）；
+- 失败语义：超时/限流/鉴权失败/非法 JSON 一律回退原文，`/predict` 永不 5xx；熔断按连接隔离，一个坏 Key 不影响本地 Qwen；429 只进短暂限流窗口不计故障；
+- 切换模型、更新连接（revision +1）后缓存键自动隔离，旧改写不复用。
+
 ## 本地原生运行（Mac 上用 MPS 训练更快）
 
 ```bash
@@ -201,6 +221,7 @@ POST /api/v1/inference/predict|batch|compare          推理（request_id 注入
 - [产品使用手册](PRODUCT_USER_MANUAL.md)：前台体验、训练后台、Query 改写、部署运维与排障；
 - [技术设计](../TECHNICAL_DESIGN.md)：系统边界、数据模型、接口和验收设计；
 - [Query 改写落地方案](QUERY_REWRITE_IMPLEMENTATION_PLAN.md)：改写协议、安全门、评测和上线策略；
+- [外部模型 API 接入方案](QUERY_REWRITE_EXTERNAL_PROVIDER_IMPLEMENTATION_PLAN.md)：GLM/OpenAI-compatible Provider、密钥管理、动态切换、测试与发布计划；
 - [验收记录](docs/ACCEPTANCE.md)：设计验收项及核验状态；
 - [安全例外](SECURITY_EXCEPTIONS.md)：依赖漏洞例外和到期策略。
 

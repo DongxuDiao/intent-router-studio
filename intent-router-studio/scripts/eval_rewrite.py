@@ -46,8 +46,28 @@ def main() -> int:
     parser.add_argument("--eval-file", default=str(REPO / "examples" / "rewrite_eval.jsonl"))
     parser.add_argument("--out", default=None, help="报告输出 JSON 路径（缺省打印不落盘）")
     parser.add_argument("--terminology", default=None, help="可选：先上传术语表 JSON 再评测")
+    parser.add_argument(
+        "--provider-connection", default=None,
+        help="可选：切换项目改写模型连接（builtin:local_qwen 或 rpc_*）后再评测（外部模型 V1 §13 阶段5）",
+    )
     parser.add_argument("--timeout", type=float, default=30.0)
     args = parser.parse_args()
+
+    if args.provider_connection:
+        # 保留现有策略字段，仅切换模型连接（保存为新配置版本，可回滚）
+        with urllib.request.urlopen(
+            f"{args.base_url.rstrip('/')}/projects/{args.project}/rewrite-config", timeout=10
+        ) as resp:
+            current = json.loads(resp.read())["active"]["config"]
+        current["provider_connection_id"] = args.provider_connection
+        req = urllib.request.Request(
+            f"{args.base_url.rstrip('/')}/projects/{args.project}/rewrite-config",
+            data=json.dumps({"config": current}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="PUT",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            saved = json.loads(resp.read())
+        print(f"改写模型已切换: {args.provider_connection}（配置版本 v{saved['version']}，测试前请确认连接已测试通过）")
 
     if args.terminology:
         terms = json.loads(Path(args.terminology).read_text(encoding="utf-8"))
