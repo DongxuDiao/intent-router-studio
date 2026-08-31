@@ -269,8 +269,12 @@ def test_recover_staged_project_deletion_cleans_trash_after_database_commit(clie
     source.mkdir(parents=True)
     (source / "data.txt").write_text("already deleted", encoding="utf-8")
     trash, _moved = project_service._stage_artifacts(project_id, [source])
+    # 模拟“数据库已提交删除”：先解除 active Schema 指针再删 Schema 行（FK 约束）
+    project = db.get(Project, project_id)
+    project.active_label_schema_id = None
+    db.flush()
     db.query(LabelSchemaVersion).filter(LabelSchemaVersion.project_id == project_id).delete()
-    db.delete(db.get(Project, project_id))
+    db.delete(project)
     db.commit()
 
     result = project_service.recover_staged_project_deletions(db)

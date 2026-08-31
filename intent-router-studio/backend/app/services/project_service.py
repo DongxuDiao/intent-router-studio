@@ -1,7 +1,6 @@
 """项目服务：创建项目时初始化默认五分类 Label Schema。"""
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -46,17 +45,26 @@ def create_project(db: Session, name: str, description: str = "") -> Project:
     db.add(project)
     db.flush()  # 先落 Project 行，保证 schema 外键可满足
 
-    schema = default_label_schema()
-    schema_json = json.dumps(schema, ensure_ascii=False, sort_keys=True)
-    db.add(
-        LabelSchemaVersion(
-            id=ids.prefixed(ids.LABEL_SCHEMA),
-            project_id=project.id,
-            version=1,
-            schema_json=schema,
-            hash=hashlib.sha256(schema_json.encode("utf-8")).hexdigest(),
-        )
+    # 自定义意图标签 §6.2：新项目仍默认兼容五分类，但以 v2 文档存储并显式写指针
+    from datetime import UTC, datetime
+
+    from app.router_core.label_schema import default_compat_document, schema_hash
+
+    doc = default_compat_document()
+    schema_row = LabelSchemaVersion(
+        id=ids.prefixed(ids.LABEL_SCHEMA),
+        project_id=project.id,
+        version=1,
+        schema_json=doc.to_dict(),
+        hash=schema_hash(doc),
+        status="ACTIVE",
+        change_summary="项目创建默认五分类",
+        created_by="local",
+        published_at=datetime.now(UTC),
     )
+    db.add(schema_row)
+    db.flush()
+    project.active_label_schema_id = schema_row.id
     db.commit()
     db.refresh(project)
     return project
@@ -70,16 +78,20 @@ def get_project(db: Session, project_id: str) -> Project:
 
 
 def get_label_schema(db: Session, project_id: str) -> dict:
+    """兼容期旧接口（§5.1）：等价于读取 active Schema，响应补 id/version/status/schema_format。"""
+    from app.router_core.label_schema import SCHEMA_FORMAT_V2
+
     get_project(db, project_id)
-    row = (
-        db.query(LabelSchemaVersion)
-        .filter(LabelSchemaVersion.project_id == project_id)
-        .order_by(LabelSchemaVersion.version.desc())
-        .first()
-    )
+    from app.services import label_schema_service
+
+    row = label_schema_service.get_active_row(db, project_id)
     if row is None:
-        return default_label_schema()
-    return row.schema_json
+        doc = default_label_schema()
+        return {**doc, "id": None, "version": None, "status": None, "schema_format": SCHEMA_FORMAT_V2}
+    doc = label_schema_service.resolve_document(row)
+    out = doc.to_dict()
+    return {**out, "id": row.id, "version": row.version, "status": row.status,
+            "schema_format": doc.schema_format}
 
 
 def _deletion_rows(db: Session, project_id: str) -> dict[str, list]:
@@ -371,6 +383,8 @@ def delete_project(db: Session, project_id: str, confirm_name: str | None = None
         try:
             project.active_model_id = None
             project.active_rewrite_config_id = None
+            # 自定义意图标签 §4.1：先解除 Schema 指针，避免删除 Schema 行时触发 FK
+            project.active_label_schema_id = None
             db.flush()
             for key, model in (
                 ("models", ModelVersion),

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import ids
-from app.api import datasets, inference, models, projects, provider_connections, rewrite, runs, system
+from app.api import datasets, inference, label_schemas, models, projects, provider_connections, rewrite, runs, system
 from app.config import REPO_ROOT, get_settings
 from app.db import SessionLocal, init_db
 from app.errors import ApiError
@@ -212,6 +212,7 @@ def create_app() -> FastAPI:
     app.include_router(inference.router, prefix=prefix)
     app.include_router(rewrite.router, prefix=prefix)
     app.include_router(provider_connections.router, prefix=prefix)
+    app.include_router(label_schemas.router, prefix=prefix)
 
     # ---- 静态前端（生产模式由 FastAPI 托管构建产物，设计文档 17.3）----
     static_candidates = [
