@@ -43,13 +43,11 @@ class ProviderRegistry:
         return provider
 
     def _resolve_remote(self, connection_id: str) -> tuple[tuple[str, int], Any]:
-        with self._lock:
-            # 先查缓存：命中则直接复用（避免一次 DB 读）
-            for key, cached in self._cache.items():
-                if key[0] == connection_id:
-                    return key, cached
-
-        # 缓存未命中：读库构造（在锁外做 DB/解密，锁内只做缓存写）
+        # 每次解析都读一次连接行（主键查询，SQLite 微秒级）。连接的更新/
+        # 删除/禁用只在处理该请求的进程内触发 listener，rewriter 进程无法
+        # 跨进程收到通知——必须以数据库当前 revision 为准发现变化，
+        # 否则会一直用旧 Key/旧端点的缓存实例（连接测试走 API 进程新建
+        # Provider 会通过，业务改写却持续失败）。
         from app.db import SessionLocal
         from app.services import provider_connection_service as svc
 
@@ -57,18 +55,31 @@ class ProviderRegistry:
         try:
             row = db.get(svc.RewriteProviderConnection, connection_id)
             if row is None:
+                self.invalidate(connection_id)
                 raise ProviderUnavailable(f"连接不存在: {connection_id}")
             if not row.enabled:
+                self.invalidate(connection_id)
                 raise ProviderUnavailable(f"连接已禁用: {connection_id}")
             if not row.api_key_ciphertext:
+                self.invalidate(connection_id)
                 raise ProviderUnavailable(f"连接没有 API Key: {connection_id}")
             key = (connection_id, row.revision)
             with self._lock:
                 cached = self._cache.get(key)
                 if cached is not None:
+                    # 同连接旧 revision 的残留实例一并淘汰
+                    for stale in [k for k in self._cache if k[0] == connection_id and k != key]:
+                        self._close_quietly(self._cache.pop(stale))
                     return key, cached
-                provider = svc._build_remote_provider(row)
+            # 构造（解密）在锁外进行，锁内只做缓存写
+            provider = svc._build_remote_provider(row)
+            with self._lock:
+                raced = self._cache.get(key)
+                if raced is not None:
+                    return key, raced
                 self._cache[key] = provider
+                for stale in [k for k in self._cache if k[0] == connection_id and k != key]:
+                    self._close_quietly(self._cache.pop(stale))
                 while len(self._cache) > MAX_CACHED_PROVIDERS:
                     _, evicted = self._cache.popitem(last=False)
                     self._close_quietly(evicted)

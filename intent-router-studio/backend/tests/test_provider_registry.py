@@ -134,3 +134,44 @@ def test_delete_connection_invalidates_registry(db, connection):
     set_registry(registry)
     svc.delete_connection(db, connection.id)
     assert old.closed
+
+
+# ---------------------------------------------------------------- 跨进程 revision 感知
+
+def test_registry_detects_revision_change_without_listener(db, connection):
+    """模拟另一进程更新连接（无 listener 通知）：registry 读库发现 revision
+    变化后必须重建实例，淘汰旧实例。"""
+    registry = ProviderRegistry(StubProvider())
+    old = registry.resolve(connection.id)
+    # 直接改库 +2（绕过 update_connection 的 listener，模拟 rewriter 进程视角）
+    db.query(RewriteProviderConnection).filter(
+        RewriteProviderConnection.id == connection.id
+    ).update({"revision": old.connection_revision + 1, "model_id": "glm-5-air"})
+    db.commit()
+
+    fresh = registry.resolve(connection.id)
+    assert fresh is not old
+    assert fresh.connection_revision == old.connection_revision + 1
+    assert fresh.model_id == "glm-5-air"
+    assert old.closed
+
+
+def test_registry_detects_disable_without_listener(db, connection):
+    registry = ProviderRegistry(StubProvider())
+    registry.resolve(connection.id)  # 建立缓存
+    db.query(RewriteProviderConnection).filter(
+        RewriteProviderConnection.id == connection.id
+    ).update({"enabled": False})
+    db.commit()
+    with pytest.raises(ProviderUnavailable):
+        registry.resolve(connection.id)
+
+
+def test_registry_detects_delete_without_listener(db, connection):
+    registry = ProviderRegistry(StubProvider())
+    cached = registry.resolve(connection.id)
+    db.delete(connection)
+    db.commit()
+    with pytest.raises(ProviderUnavailable):
+        registry.resolve(connection.id)
+    assert cached.closed
