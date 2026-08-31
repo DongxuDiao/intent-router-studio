@@ -34,7 +34,9 @@ _VALID_CONTENT = json.dumps(
 
 def _success_body(content: str = _VALID_CONTENT) -> dict:
     return {
-        "choices": [{"message": {"content": content}}],
+        "id": "chatcmpl-test",
+        "created": 1,
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
         "request_id": "glmr-abc123",
         "model": "glm-5.2",
         "usage": {"prompt_tokens": 210, "completion_tokens": 24, "total_tokens": 234},
@@ -124,12 +126,12 @@ def test_glm_base_url_is_fixed():
     assert provider.base_url.endswith("/api/paas/v4")
 
 
-def test_glm_thinking_enabled_omits_flag():
+def test_glm_thinking_enabled_is_explicit():
     capture: list[httpx.Request] = []
     handler, _ = _handler([_success_body()], capture)
     provider = _glm(httpx.MockTransport(handler), generation_config={"thinking": True})
     provider.rewrite("q", None, None, 3000)
-    assert "thinking" not in json.loads(capture[0].content)
+    assert json.loads(capture[0].content)["thinking"] == {"type": "enabled"}
 
 
 def test_glm_53_flash_forces_thinking_enabled():
