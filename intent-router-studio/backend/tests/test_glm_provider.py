@@ -320,3 +320,39 @@ def test_close_closes_pool():
     provider = _glm(httpx.MockTransport(lambda req: httpx.Response(200, json=_success_body())))
     provider.close()
     assert provider._http.is_closed
+
+
+# ---------------------------------------------------------------- Coding Plan 错误族（429 + 1308~1321）
+
+@pytest.mark.parametrize(
+    "code,exc_type,fb",
+    [
+        ("1308", ProviderQuotaExceeded, "PROVIDER_QUOTA_EXCEEDED"),  # 用量达上限待重置
+        ("1310", ProviderQuotaExceeded, "PROVIDER_QUOTA_EXCEEDED"),  # 周/月上限
+        ("1316", ProviderQuotaExceeded, "PROVIDER_QUOTA_EXCEEDED"),  # 5h 上限+余额不足
+    ],
+)
+def test_coding_plan_window_caps_are_quota_not_rate_limit(code, exc_type, fb):
+    handler, calls = _handler([{"error": {"code": code, "message": "已达到使用上限"}, "_status": 429}])
+    provider = _glm(httpx.MockTransport(handler))
+    with pytest.raises(exc_type) as exc:
+        provider.rewrite("q", None, None, 2000)
+    assert exc.value.fallback_code == fb
+    assert exc.value.persistent is True
+    assert calls["n"] == 1  # 窗口额度耗尽不重试
+
+
+def test_coding_plan_model_not_in_plan_is_config_error():
+    handler, calls = _handler([{"error": {"code": "1311", "message": "未开放该模型"}, "_status": 429}])
+    provider = _glm(httpx.MockTransport(handler))
+    with pytest.raises(ProviderBadRequest) as exc:
+        provider.rewrite("q", None, None, 2000)
+    assert "1311" in str(exc.value) and "glm-5.2" in str(exc.value)
+    assert calls["n"] == 1
+
+
+def test_coding_plan_fair_use_is_rate_limited():
+    handler, _ = _handler([{"error": {"code": "1313", "message": "公平使用策略"}, "_status": 429}])
+    provider = _glm(httpx.MockTransport(handler))
+    with pytest.raises(ProviderRateLimited):
+        provider.rewrite("q", None, None, 2000)

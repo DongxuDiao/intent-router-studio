@@ -37,13 +37,21 @@ GLM_CODING_BASE_URL = "https://open.bigmodel.cn/api/coding/paas/v4"
 # GLM 只允许这两个官方地址；任意 URL 一律走 openai_compatible 类型
 _GLM_ALLOWED_BASE_URLS = {GLM_BASE_URL, GLM_CODING_BASE_URL}
 
-# 智谱业务错误码 → 错误类别（V1 §4.3 表）
+# 智谱业务错误码 → 错误类别（V1 §4.3 表 + 官方错误码文档）
 _GLM_INVALID_CODES = {"1210", "1211", "1212", "1213", "1214", "1215", "1261", "1301"}
 _GLM_AUTH_CODES = {"1000", "1001", "1002", "1003"}
 _GLM_FORBIDDEN_CODES = {"1220"}
 _GLM_RATE_LIMIT_CODES = {"1302"}
 _GLM_OVERLOADED_CODES = {"1305"}
 _GLM_QUOTA_CODES = {"1113"}
+# Coding Plan 家族（官方错误码文档，均为 429）：
+# 1308 用量达上限待重置 / 1309 套餐到期 / 1310 周月上限 / 1314 企业套餐失效 /
+# 1316~1321 各类 5 小时/7 天窗口上限叠加余额或账号限制 → 额度类（不重试）
+_GLM_PLAN_QUOTA_CODES = {"1308", "1309", "1310", "1314", "1316", "1317", "1318", "1319", "1320", "1321"}
+# 1311 套餐未开放该模型 / 1315 Key 仅限企业编程套餐 → 配置问题（改模型或换 Key）
+_GLM_PLAN_CONFIG_CODES = {"1311", "1315"}
+# 1313 公平使用策略限频 → 速率限制
+_GLM_PLAN_RATE_CODES = {"1313"}
 
 
 class GlmProvider(OpenAICompatibleProvider):
@@ -140,7 +148,17 @@ class GlmProvider(OpenAICompatibleProvider):
             raise exc
         if status == 429 or code in _GLM_RATE_LIMIT_CODES | _GLM_OVERLOADED_CODES:
             if code in _GLM_QUOTA_CODES or (not code and _quota_like(None, message)) or _quota_like(code, message):
-                raise ProviderQuotaExceeded("GLM 额度耗尽")
+                raise ProviderQuotaExceeded("GLM 额度耗尽（业务码 1113：账户欠费，请充值）")
+            if code in _GLM_PLAN_QUOTA_CODES:
+                raise ProviderQuotaExceeded(
+                    f"GLM 套餐额度已用尽（业务码 {code}），等待窗口重置或续订后恢复"
+                )
+            if code in _GLM_PLAN_CONFIG_CODES:
+                if code == "1311":
+                    raise ProviderBadRequest(
+                        f"GLM 当前订阅套餐未开放该模型（业务码 1311，当前 {self.model_id}），请切换模型"
+                    )
+                raise ProviderBadRequest("GLM 该 Key 仅限企业编程套餐使用（业务码 1315），请更换 Key 类型")
             exc = ProviderRateLimited(f"GLM 速率限制（业务码 {code or '-'}）")
             if code in _GLM_OVERLOADED_CODES:
                 exc.fallback_code = "PROVIDER_OVERLOADED"
