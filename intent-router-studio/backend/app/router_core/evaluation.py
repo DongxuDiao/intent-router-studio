@@ -14,7 +14,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precisio
 from app.router_core.calibration import calibration_metrics, reliability_diagram
 from app.router_core.policy import Thresholds
 from app.router_core.taxonomy import LABELS
-from app.router_core.threshold_search import route_metrics
+from app.router_core.threshold_search import effect_vectors, route_metrics
 
 
 def classification_metrics(
@@ -70,19 +70,46 @@ def evaluate_split(
     probs_calibrated: np.ndarray,
     thresholds: Thresholds,
     labels: list[str] | None = None,
+    effect_by_label: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """对单个 split 输出完整指标：原始分类 + 阈值门路由 + 校准。"""
+    """对单个 split 输出完整指标：业务意图分类 + 系统效果层 + 阈值门路由 + 校准。
+
+    Review 修复 §6.3：intent 与 effect 两层口径并存——
+    classification 为业务意图指标；effects 为系统效果指标（effect accuracy/F1、
+    false write / missed write、OOS recall）；routing 的 safe_coverage 按
+    「接受且业务意图正确」，effect_safe_coverage 按「接受且效果正确」。
+    """
     labels = labels or LABELS
+    label_effects = effect_vectors(labels, effect_by_label)
     y_pred = probs_calibrated.argmax(axis=1)  # 校准不改变排序
     raw = classification_metrics(y_true, y_pred, labels)
-    routed = route_metrics(probs_calibrated, y_true, thresholds, labels)
+    routed = route_metrics(probs_calibrated, y_true, thresholds, labels, effect_by_label)
 
-    pos = {lab: i for i, lab in enumerate(labels)}
-    non_write = y_true != pos["write_action"]
+    pred_effects = label_effects[y_pred]
+    true_effects = label_effects[y_true]
+    effect_classes = list(dict.fromkeys([*label_effects.tolist(), "unclear"]))
+    eff_pos = {e: i for i, e in enumerate(effect_classes)}
+    eff_true_idx = np.array([eff_pos[e] for e in true_effects])
+    eff_pred_idx = np.array([eff_pos[e] for e in pred_effects])
+    eff_cls = classification_metrics(eff_true_idx, eff_pred_idx, effect_classes)
+
+    non_write = true_effects != "write_action"
     n_non_write = int(non_write.sum())
+    raw_false_write = int(((pred_effects == "write_action") & non_write).sum())
+    raw_missed_write = int(((true_effects == "write_action") & (pred_effects != "write_action")).sum())
+    true_oos = true_effects == "oos"
+    oos_recall = round(float((pred_effects[true_oos] == "oos").mean()), 6) if true_oos.any() else None
 
     result = {
         "classification": raw,
+        "effects": {
+            "classification": eff_cls,
+            "false_write_count": raw_false_write,
+            "false_write_rate": round(raw_false_write / n_non_write, 6) if n_non_write else 0.0,
+            "missed_write_count": raw_missed_write,
+            "oos_recall": oos_recall,
+            "clarification_rate": routed["unclear_rate"],
+        },
         "routing": routed,
         "false_write_confidence_interval": {
             "false_write_count": routed["false_write_count"],
@@ -104,6 +131,7 @@ def slice_metrics(
     thresholds: Thresholds,
     slice_flags: np.ndarray,
     labels: list[str] | None = None,
+    effect_by_label: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """风险切片指标：每个 slice 的样本数、Macro F1、false write、路由指标。"""
     labels = labels or LABELS
@@ -114,7 +142,7 @@ def slice_metrics(
         if mask.sum() == 0:
             continue
         cm = classification_metrics(y_true[mask], y_pred[mask], labels)
-        routed = route_metrics(probs[mask], y_true[mask], thresholds, labels)
+        routed = route_metrics(probs[mask], y_true[mask], thresholds, labels, effect_by_label)
         out[str(name)] = {
             "support": int(mask.sum()),
             "macro_f1": cm["macro_f1"],

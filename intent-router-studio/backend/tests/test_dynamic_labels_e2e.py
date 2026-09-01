@@ -113,13 +113,24 @@ def test_runtime_loads_custom_label_artifact(tmp_path, monkeypatch):
     labels = ["metric_qa", "status_query", "log_query", "task_create", "task_update", "vague", "outside"]
     payload = {
         "schema_format": "intent-schema-v2", "schema_id": "lsv_x", "schema_hash": "abc",
-        "labels": labels, "label_definitions": [],
+        "labels": labels,
+        "label_definitions": [
+            {"key": "metric_qa", "effect_type": "information"},
+            {"key": "status_query", "effect_type": "read_only"},
+            {"key": "log_query", "effect_type": "read_only"},
+            {"key": "task_create", "effect_type": "write_action"},
+            {"key": "task_update", "effect_type": "write_action"},
+            {"key": "vague", "effect_type": "unclear"},
+            {"key": "outside", "effect_type": "oos"},
+        ],
     }
     _artifact_with_labels(tmp_path, monkeypatch, payload)
     runtime = ModelRuntime.load(tmp_path, "mdl_x", verify=True)
     assert runtime.labels == labels  # 顺序即制品数组顺序（分类头契约）
     result = runtime.predict("查一下状态")
-    assert result["route"] in labels
+    # 两层契约：intent 是业务标签（桩模型 top1 恒为第 0 列），route=effect_type
+    assert result["intent"] == labels[0]
+    assert result["effect_type"] == "information" and result["route"] == "information"
 
 
 def test_runtime_accepts_legacy_v1_artifact(tmp_path, monkeypatch):

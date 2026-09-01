@@ -301,6 +301,7 @@ class RunExecutor:
 
         schema = resolve_dataset_schema(db, dataset)
         schema_label_order = list(schema.label_keys)
+        effect_by_label = dict(schema.effect_by_label)  # Review 修复 §6.1：贯穿调用链
         ensure_training_labels(labels_by_split["train"], schema.document)
         log.log("INFO", f"训练 Schema 标签 {len(schema_label_order)} 类: {schema_label_order}")
         log.progress(RunStatus.PREPARING, 4, f"样本分布 train={len(texts_by_split['train'])} val={len(texts_by_split['validation'])} test={len(texts_by_split['test'])}")
@@ -352,7 +353,10 @@ class RunExecutor:
 
         # ---------- SEARCHING_THRESHOLDS ----------
         log.progress(RunStatus.SEARCHING_THRESHOLDS, 66, "约束阈值搜索（validation）")
-        search_result = search_thresholds(val_probs, val_y, label_list=label_order, spec=run.config.get("threshold_search"))
+        search_result = search_thresholds(
+            val_probs, val_y, label_list=label_order, spec=run.config.get("threshold_search"),
+            effect_by_label=effect_by_label,
+        )
         thresholds = search_result.best if search_result.feasible else Thresholds()
         if not search_result.feasible:
             log.log("WARN", f"未找到满足约束的阈值：{search_result.note}，使用冷启动默认阈值")
@@ -376,14 +380,20 @@ class RunExecutor:
         # ---------- EVALUATING ----------
         log.progress(RunStatus.EVALUATING, 76, "冻结阈值评估 test")
         test_probs = calibrate(test_logits, temperature)
-        val_eval = evaluate_split(val_y, softmax(val_logits, axis=1), val_probs, thresholds, label_order)
-        test_eval = evaluate_split(test_y, softmax(test_logits, axis=1), test_probs, thresholds, label_order)
+        val_eval = evaluate_split(
+            val_y, softmax(val_logits, axis=1), val_probs, thresholds, label_order, effect_by_label
+        )
+        test_eval = evaluate_split(
+            test_y, softmax(test_logits, axis=1), test_probs, thresholds, label_order, effect_by_label
+        )
 
         # 风险切片
         test_sub = merged[merged["split"] == "test"].reset_index(drop=True)
         slice_flags = test_sub["risk_slice"].fillna("none").replace("", "none")
         slice_flags = slice_flags.where(~test_sub["is_hard_negative"].astype(bool), "hard_negative")
-        slices = slice_metrics(test_y, test_probs, thresholds, slice_flags.to_numpy(), label_order)
+        slices = slice_metrics(
+            test_y, test_probs, thresholds, slice_flags.to_numpy(), label_order, effect_by_label
+        )
 
         risk_mask = test_sub["is_risk_test"].astype(bool).to_numpy() if "is_risk_test" in test_sub.columns else np.zeros(len(test_sub), dtype=bool)
         risk_eval = None
@@ -391,7 +401,7 @@ class RunExecutor:
             risk_eval = {
                 "support": int(risk_mask.sum()),
                 "classification": classification_metrics(test_y[risk_mask], test_probs[risk_mask].argmax(axis=1), label_order),
-                "routing": route_metrics(test_probs[risk_mask], test_y[risk_mask], thresholds, label_order),
+                "routing": route_metrics(test_probs[risk_mask], test_y[risk_mask], thresholds, label_order, effect_by_label),
             }
 
         distributions = confidence_margin_distribution(test_probs)
@@ -407,6 +417,9 @@ class RunExecutor:
         log.log("INFO", f"推理延迟 P95={latency['p95']}ms（{device}）")
 
         per_sample_frames = []
+        # Review 修复 §6.3：correct_raw 为业务意图层；final_route/correct_final 为
+        # 系统效果层（final_route = effect_type，与 Policy 契约一致）
+        label_effect_list = [effect_by_label.get(lab, lab) for lab in label_order]
         for split_name, probs, y_true in (
             ("validation", val_probs, val_y),
             ("test", test_probs, test_y),
@@ -415,13 +428,14 @@ class RunExecutor:
             decisions = []
             for row_probs in probs:
                 prob_map = {lab: float(p) for lab, p in zip(label_order, row_probs, strict=True)}
-                decisions.append(decide(prob_map, thresholds))
+                decisions.append(decide(prob_map, thresholds, effect_by_label))
             frame = pd.DataFrame(
                 {
                     "sample_id": sub["sample_id"],
                     "text": sub["text"],
                     "context": sub["context"],
                     "true_label": [label_order[i] for i in y_true],
+                    "true_effect": [label_effect_list[i] for i in y_true],
                     "raw_pred": [label_order[i] for i in probs.argmax(axis=1)],
                     "final_route": [d.route for d in decisions],
                     "decision": [d.decision for d in decisions],
@@ -434,7 +448,7 @@ class RunExecutor:
                     "group_id": sub["group_id"],
                     "split": split_name,
                     "correct_raw": [label_order[i] == label_order[t] for i, t in zip(probs.argmax(axis=1), y_true, strict=True)],
-                    "correct_final": [d.route == label_order[t] for d, t in zip(decisions, y_true, strict=True)],
+                    "correct_final": [d.route == label_effect_list[t] for d, t in zip(decisions, y_true, strict=True)],
                 }
             )
             for lab in label_order:
@@ -480,6 +494,8 @@ class RunExecutor:
             "split_id": run.split_id,
             "created_at": datetime.now(UTC).isoformat(),
             "label_order": label_order,
+            "schema_id": schema.schema_id,
+            "schema_hash": schema.schema_hash,
             "calibration": {
                 **calib_report.to_dict(),
                 "reliability_before": diagram_before,
@@ -497,12 +513,15 @@ class RunExecutor:
         }
         artifact_service.write_json(workdir / "metrics.json", metrics_doc)
 
-        # 指标入库（供列表页快速索引）
+        # 指标入库（供列表页快速索引）；业务意图层 + 系统效果层（Review 修复 §6.3）
         for metric_name, value in (
             ("macro_f1", test_eval["classification"]["macro_f1"]),
             ("accuracy", test_eval["classification"]["accuracy"]),
+            ("effect_macro_f1", test_eval["effects"]["classification"]["macro_f1"]),
+            ("effect_accuracy", test_eval["effects"]["classification"]["accuracy"]),
             ("false_write_rate", test_eval["routing"]["false_write_rate"]),
             ("safe_coverage", test_eval["routing"]["safe_coverage"]),
+            ("effect_safe_coverage", test_eval["routing"]["effect_safe_coverage"]),
             ("coverage", test_eval["routing"]["coverage"]),
             ("selective_accuracy", test_eval["routing"]["selective_accuracy"]),
             ("unclear_rate", test_eval["routing"]["unclear_rate"]),

@@ -11,6 +11,7 @@ from typing import Any
 from app.router_core.system_effects import (
     EFFECT_CEILING,
     REQUIRED_NEXT_GATE,
+    SYSTEM_EFFECT_TYPES,
     effect_ceiling_for,
     required_gate_for,
 )
@@ -53,11 +54,13 @@ class Thresholds:
 
 @dataclass
 class PolicyResult:
-    route: str                      # 最终路由（可能为 unclear）
-    decision: str                   # accept | unclear
-    confidence: float               # top1 概率（校准后）
-    margin: float                   # top1 - top2
-    top_k: list[dict[str, Any]]     # [{label, probability}]
+    intent: str | None             # 业务意图标签（拒识时保留 top-1 候选）
+    route: str                     # 兼容字段 = effect_type（可能为 unclear）
+    effect_type: str               # 固定系统效果类型（拒识时为 unclear）
+    decision: str                  # accept | unclear
+    confidence: float              # top1 概率（校准后）
+    margin: float                  # top1 - top2
+    top_k: list[dict[str, Any]]    # [{label, effect_type, probability}]
     reason_codes: list[str] = field(default_factory=list)
     effect_ceiling: str = "none"
     required_next_gate: str = "none"
@@ -66,12 +69,20 @@ class PolicyResult:
         return asdict(self)
 
 
-def _label_threshold(label: str, thresholds: Thresholds) -> float:
-    if label == "write_action":
+def _effect_threshold(effect_type: str, thresholds: Thresholds) -> float:
+    """阈值按系统效果类型选择（Review 修复 §5.1）：映射为 write_action 的
+    任意业务标签都必须用写入专用阈值。"""
+    if effect_type == "write_action":
         return thresholds.write_min_confidence
-    if label == "oos":
+    if effect_type == "oos":
         return thresholds.oos_min_confidence
     return thresholds.default_min_confidence
+
+
+def _resolve_effect(label: str, effect_type_for: dict[str, str] | None) -> str | None:
+    """标签 → 系统效果类型；缺省恒等（五分类），未知返回 None（fail closed）。"""
+    effect = (effect_type_for or {}).get(label, label)
+    return effect if effect in SYSTEM_EFFECT_TYPES else None
 
 
 def decide(
@@ -79,10 +90,11 @@ def decide(
     thresholds: Thresholds,
     effect_type_for: dict[str, str] | None = None,
 ) -> PolicyResult:
-    """effect_type_for：标签→系统效果类型映射（自定义意图标签 §6.8）。
-    缺省按标签本身查表（五分类恒等）；未知效果 fail closed（ceiling=none、
-    gate=clarification），effect 只能由服务端解析。"""
-    """对单个样本的概率分布执行确定性决策门。
+    """对单个样本的概率分布执行确定性决策门（Review 修复 §5.1 顺序）：
+
+    1. 取 top-1 业务标签；2. 服务端 Schema 映射得 effect type；
+    3. 未知映射 fail closed 为 unclear（reason MODEL_SCHEMA_MISMATCH）；
+    4. 按 effect type 选择阈值；5. 通过后输出业务意图与系统策略。
 
     probabilities: label -> 概率（应使用校准后的概率）
     """
@@ -91,19 +103,31 @@ def decide(
     top2_prob = ranked[1][1] if len(ranked) > 1 else 0.0
     margin = top1_prob - top2_prob
 
-    top_k = [{"label": label, "probability": round(prob, 6)} for label, prob in ranked]
+    top_k = [
+        {
+            "label": label,
+            "effect_type": _resolve_effect(label, effect_type_for),
+            "probability": round(prob, 6),
+        }
+        for label, prob in ranked
+    ]
 
-    min_confidence = _label_threshold(top1_label, thresholds)
+    effect = _resolve_effect(top1_label, effect_type_for)
 
     reason_codes: list[str] = []
-    if top1_prob < min_confidence:
-        reason_codes.append("LOW_CONFIDENCE")
-    if margin < thresholds.min_margin:
-        reason_codes.append("LOW_MARGIN")
+    if effect is None:
+        reason_codes.append("MODEL_SCHEMA_MISMATCH")
+    else:
+        if top1_prob < _effect_threshold(effect, thresholds):
+            reason_codes.append("LOW_CONFIDENCE")
+        if margin < thresholds.min_margin:
+            reason_codes.append("LOW_MARGIN")
 
     if reason_codes:
         return PolicyResult(
+            intent=top1_label,
             route="unclear",
+            effect_type="unclear",
             decision="unclear",
             confidence=round(top1_prob, 6),
             margin=round(margin, 6),
@@ -116,15 +140,13 @@ def decide(
     prefix = {
         "write_action": "WRITE",
         "oos": "OOS",
-        "information": "DEFAULT",
-        "read_only": "DEFAULT",
-        "unclear": "DEFAULT",
-    }.get(top1_label, "DEFAULT")
+    }.get(effect, "DEFAULT")
     reason_codes = [f"{prefix}_THRESHOLD_PASSED", "MARGIN_PASSED"]
 
-    effect = (effect_type_for or {}).get(top1_label, top1_label)
     return PolicyResult(
-        route=top1_label,
+        intent=top1_label,
+        route=effect,  # 兼容字段：第一阶段等于 effect_type（§5.2）
+        effect_type=effect,
         decision="accept",
         confidence=round(top1_prob, 6),
         margin=round(margin, 6),
@@ -135,10 +157,15 @@ def decide(
     )
 
 
-def decide_batch(prob_matrix, labels: list[str], thresholds: Thresholds) -> list[PolicyResult]:
+def decide_batch(
+    prob_matrix,
+    labels: list[str],
+    thresholds: Thresholds,
+    effect_by_label: dict[str, str] | None = None,
+) -> list[PolicyResult]:
     """批量决策：prob_matrix 形状 (n, len(labels))，列顺序与 labels 一致。"""
     results = []
     for row in prob_matrix:
         probs = {label: float(p) for label, p in zip(labels, row, strict=True)}
-        results.append(decide(probs, thresholds))
+        results.append(decide(probs, thresholds, effect_by_label))
     return results

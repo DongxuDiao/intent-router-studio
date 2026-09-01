@@ -41,56 +41,78 @@ def _top1_stats(probs: np.ndarray):
     return p1, p2, p1 - p2
 
 
+def effect_vectors(labels: list[str], effect_by_label: dict[str, str] | None) -> np.ndarray:
+    """标签列表 → 系统效果类型向量（Review 修复 §6.2）。
+
+    缺省恒等映射（五分类标签即效果类型）；禁止在函数内部读取全局 LABELS 推断效果。
+    """
+    mapping = effect_by_label or {}
+    return np.array([mapping.get(lab, lab) for lab in labels], dtype=object)
+
+
 def route_metrics(
     probs: np.ndarray,
     y: np.ndarray,
     thresholds: Thresholds,
     labels: list[str] | None = None,
+    effect_by_label: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """给定（校准后）概率与阈值，计算路由级指标（设计文档 7.2）。
+    """给定（校准后）概率与阈值，计算路由级指标（设计文档 7.2 + Review 修复 §6.3）。
+
+    分组与阈值按 effect 向量：支持无 write_action 业务标签、多标签共映射写操作、
+    无 OOS 训练标签的自定义 Schema（五分类恒等映射下数值与旧实现一致）。
 
     - accepted：决策门输出 accept
     - coverage = accepted / total
-    - selective_accuracy = accepted 且正确 / accepted
+    - safe_coverage = 接受且业务意图正确 / total；effect_safe_coverage = 接受且效果正确 / total
     - false_write_rate = 接受为写但真值非写 / 真值非写总数
-    - clarification_rate = unclear 决策数 / total
+    - missed_write_count = 真值写但原始预测效果非写（漏写，模型层）
+    - oos_recall = 真值 oos 中原始预测仍为 oos 的比例（模型层）
     """
     labels = labels or LABELS
+    label_effects = effect_vectors(labels, effect_by_label)
     probs = np.asarray(probs, dtype=np.float64)
     y = np.asarray(y)
     n = len(y)
     top1_idx = probs.argmax(axis=1)
     p1, _p2, margin = _top1_stats(probs)
 
-    label_pos = {lab: i for i, lab in enumerate(labels)}
-    w = label_pos["write_action"]
-    write_thr = np.full(n, thresholds.default_min_confidence)
-    write_thr[top1_idx == w] = thresholds.write_min_confidence
-    write_thr[top1_idx == label_pos["oos"]] = thresholds.oos_min_confidence
+    pred_effects = label_effects[top1_idx]
+    true_effects = label_effects[y]
 
-    accepted = (p1 >= write_thr) & (margin >= thresholds.min_margin)
-    final_routes = np.where(accepted, np.array(labels, dtype=object)[top1_idx], "unclear")
+    conf_thr = np.full(n, thresholds.default_min_confidence)
+    conf_thr[pred_effects == "write_action"] = thresholds.write_min_confidence
+    conf_thr[pred_effects == "oos"] = thresholds.oos_min_confidence
+
+    accepted = (p1 >= conf_thr) & (margin >= thresholds.min_margin)
+    final_routes = np.where(accepted, pred_effects, "unclear")
     correct = top1_idx == y
+    correct_effect = pred_effects == true_effects
 
     accepted_count = int(accepted.sum())
     accepted_correct = int((accepted & correct).sum())
-    non_write = y != w
+    accepted_effect_correct = int((accepted & correct_effect).sum())
+    non_write = true_effects != "write_action"
     n_non_write = int(non_write.sum())
-    accepted_write = accepted & (top1_idx == w)
-    accepted_write_correct = int((accepted_write & correct).sum())
+    accepted_write = accepted & (pred_effects == "write_action")
+    accepted_write_correct = int((accepted_write & correct_effect).sum())
     accepted_write_on_non_write = int((accepted_write & non_write).sum())
-    n_true_write = int((y == w).sum())
+    n_true_write = int((true_effects == "write_action").sum())
 
-    route_counts: dict[str, int] = {lab: 0 for lab in labels}
-    route_counts["unclear"] = 0
+    missed_write = int(((true_effects == "write_action") & (pred_effects != "write_action")).sum())
+    true_oos = true_effects == "oos"
+    oos_recall = round(float((pred_effects[true_oos] == "oos").mean()), 6) if true_oos.any() else None
+
+    route_counts: dict[str, int] = {str(k): 0 for k in dict.fromkeys([*label_effects.tolist(), "unclear"])}
     for r in final_routes:
-        route_counts[r] += 1
+        route_counts[str(r)] += 1
 
     return {
         "n": n,
         "accepted_count": accepted_count,
         "coverage": round(accepted_count / n, 6) if n else None,
         "safe_coverage": round(accepted_correct / n, 6) if n else None,
+        "effect_safe_coverage": round(accepted_effect_correct / n, 6) if n else None,
         "selective_accuracy": round(accepted_correct / accepted_count, 6) if accepted_count else None,
         "false_write_rate": round(accepted_write_on_non_write / n_non_write, 6) if n_non_write else 0.0,
         "false_write_count": accepted_write_on_non_write,
@@ -98,21 +120,32 @@ def route_metrics(
         if accepted_write.sum() > 0
         else None,
         "write_recall": round(accepted_write_correct / n_true_write, 6) if n_true_write else None,
+        "missed_write_count": missed_write,
+        "oos_recall": oos_recall,
         "unclear_rate": round((n - accepted_count) / n, 6) if n else None,
         "route_counts": route_counts,
     }
 
 
-def _macro_f1(final_routes: np.ndarray, y: np.ndarray, labels: list[str]) -> float:
-    """最终路由的 Macro F1，用于并列时择优。
+def _macro_f1(
+    final_routes: np.ndarray,
+    y: np.ndarray,
+    labels: list[str],
+    label_effects: np.ndarray | None = None,
+) -> float:
+    """最终路由（effect 层）的 Macro F1，用于并列时择优。
 
-    五类各计一次（unclear 本身是标签之一，不再作为附加类重复加权）；
-    y 为真值标签索引，拒识样本路由为 unclear，与真值 unclear 同样按类统计。
+    每个出现过的 effect 类各计一次（unclear 恒计入——五分类下 unclear 本身
+    是标签之一，去重后与旧口径一致）；y 为真值标签索引，先映射到 effect 层
+    再与拒识路由 unclear 按类统计。
     """
+    effects = label_effects if label_effects is not None else np.array(labels, dtype=object)
+    true_routes = effects[y]
+    classes = list(dict.fromkeys([*effects.tolist(), "unclear"]))
     f1s = []
-    for i, cls in enumerate(labels):
+    for cls in classes:
         pred = final_routes == cls
-        true = y == i
+        true = true_routes == cls
         tp = int((pred & true).sum())
         fp = int((pred & ~true).sum())
         fn = int((~pred & true).sum())
@@ -159,11 +192,14 @@ def search_thresholds(
     y: np.ndarray,
     label_list: list[str] | None = None,
     spec: dict | None = None,
+    effect_by_label: dict[str, str] | None = None,
 ) -> ThresholdSearchResult:
     """在 validation 概率上做约束网格搜索。
 
-    向量化实现：按 top1 标签分为 write / oos / 其它三组，
-    组内按 p1 排序后用前缀和 + searchsorted 将任意阈值的统计降为 O(1)。
+    向量化实现：按 top1 预测的 effect 分为 write / oos / 其它三组
+    （Review 修复 §6.2/§6.4：分组依据是 effect 向量，不再查找名为
+    write_action/oos 的固定标签位），组内按 p1 排序后用前缀和 +
+    searchsorted 将任意阈值的统计降为 O(1)。
     """
     label_list = label_list or LABELS
     spec = {**DEFAULT_SEARCH_SPEC, **(spec or {})}
@@ -183,19 +219,22 @@ def search_thresholds(
             note="validation 集为空",
         )
 
-    pos = {lab: i for i, lab in enumerate(label_list)}
-    w_idx, oos_idx = pos["write_action"], pos["oos"]
+    label_effects = effect_vectors(label_list, effect_by_label)
     top1_idx = probs.argmax(axis=1)
     p1, _p2, margin = _top1_stats(probs)
+    pred_effects = label_effects[top1_idx]
+    true_effects = label_effects[y]
+    pred_write = pred_effects == "write_action"
+    pred_oos = pred_effects == "oos"
     correct = top1_idx == y
-    non_write = y != w_idx
+    non_write = true_effects != "write_action"
     n_non_write = int(non_write.sum())
 
     d_grid, w_grid, o_grid = _grid(spec["default_range"]), _grid(spec["write_range"]), _grid(spec["oos_range"])
     m_grid = _grid(spec["margin_range"])
 
     def group_tables(m: float):
-        """按 top1 标签分组后，对每组阈值向量给出 O(1) 级统计表。
+        """按 top1 预测 effect 分组后，对每组阈值向量给出 O(1) 级统计表。
 
         组内按 p1 升序排序，用前缀和 + searchsorted 得到
         「p1 >= 阈值」子集上的 accepted / accepted_correct / false_write 计数。
@@ -204,16 +243,16 @@ def search_thresholds(
         tables = {}
         for name, thr in (("default", d_grid), ("write", w_grid), ("oos", o_grid)):
             if name == "write":
-                members = active & (top1_idx == w_idx)
+                members = active & pred_write
             elif name == "oos":
-                members = active & (top1_idx == oos_idx)
+                members = active & pred_oos
             else:
-                members = active & (top1_idx != w_idx) & (top1_idx != oos_idx)
+                members = active & ~pred_write & ~pred_oos
             ps = p1[members]
             order = np.argsort(ps)
             ps_sorted = ps[order]
             corr_sorted = correct[members][order].astype(np.float64)
-            fw_sorted = ((top1_idx[members] == w_idx) & non_write[members])[order].astype(np.float64)
+            fw_sorted = (pred_write[members] & non_write[members])[order].astype(np.float64)
 
             cut = np.searchsorted(ps_sorted, thr, side="left")
             # 前缀和长度 = len+1（prefix[k] = 前 k 个元素之和），cut ∈ [0, len] 均合法
@@ -295,7 +334,7 @@ def search_thresholds(
     if best_coverage < 0:
         return ThresholdSearchResult(
             best=Thresholds(),
-            best_metrics=route_metrics(probs, y, Thresholds(), label_list),
+            best_metrics=route_metrics(probs, y, Thresholds(), label_list, effect_by_label),
             feasible=False,
             n=n,
             n_candidates=int(len(d_grid) * len(w_grid) * len(o_grid) * len(m_grid)),
@@ -307,7 +346,7 @@ def search_thresholds(
     # ---- 精确并列择优：safe_coverage → macro_f1 → 保守性 → 字典序 ----
     # 同一 margin 下，接受集合只由各组切点 (cut_d, cut_w, cut_o) 决定：切点相同的
     # 候选宏 F1 必然相同，先按切点去重再算 F1，避免大并列时的组合爆炸。
-    labels_arr = np.array(label_list, dtype=object)[top1_idx]
+    routes_arr = pred_effects  # 最终路由 = effect（Review 修复 §5.2）
 
     def _f1_from_cuts(t: dict, cut_d: int, cut_w: int, cut_o: int) -> float:
         accepted = np.zeros(n, dtype=bool)
@@ -315,8 +354,8 @@ def search_thresholds(
             entry = t[name]
             if len(entry["order"]):
                 accepted[entry["positions"][entry["order"][cut:]]] = True
-        final = np.where(accepted, labels_arr, "unclear")
-        return _macro_f1(final, y, label_list)
+        final = np.where(accepted, routes_arr, "unclear")
+        return _macro_f1(final, y, label_list, label_effects)
 
     key_state: dict[tuple, tuple] = {}  # (cut_d, cut_w, cut_o, m) -> (保守性, 阈值元组)
     n_tied = 0
@@ -350,7 +389,7 @@ def search_thresholds(
         oos_min_confidence=chosen[2],
         min_margin=chosen[3],
     )
-    best_metrics = route_metrics(probs, y, best_thr, label_list)
+    best_metrics = route_metrics(probs, y, best_thr, label_list, effect_by_label)
     selection = {
         "n_tied": n_tied,
         "n_unique_route_patterns": len(scored),
@@ -377,7 +416,7 @@ def search_thresholds(
                 oos_min_confidence=kw.get("oos_min_confidence", best_thr.oos_min_confidence),
                 min_margin=kw.get("min_margin", best_thr.min_margin),
             )
-            mt = route_metrics(probs, y, thr, label_list)
+            mt = route_metrics(probs, y, thr, label_list, effect_by_label)
             points.append(
                 {
                     "value": float(v),
@@ -396,7 +435,7 @@ def search_thresholds(
     for f in sampled[:500]:
         c = f["thresholds"]
         thr = Thresholds(*c)
-        mt = route_metrics(probs, y, thr, label_list)
+        mt = route_metrics(probs, y, thr, label_list, effect_by_label)
         pareto.append(
             {
                 "thresholds": thr.to_dict(),

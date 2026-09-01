@@ -318,6 +318,21 @@ def run_errors(db: Session, run_id: str, page: int = 1, page_size: int = 50) -> 
 
 
 # ---------------------------------------------------------------- thresholds
+def _run_effect_map(run: TrainingRun) -> dict[str, str]:
+    """从 Run 制品 label_schema.json 读取 effect 映射（Review 修复 §6.1：
+    模拟阈值与训练同源，禁止在函数内部用全局标签推断效果）。"""
+    art = _run_artifact_dir(run)
+    schema_path = art / "label_schema.json"
+    if not schema_path.is_file():
+        return {}
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    return {
+        item["key"]: item["effect_type"]
+        for item in schema.get("label_definitions", [])
+        if isinstance(item, dict) and item.get("key") and item.get("effect_type")
+    }
+
+
 def simulate_thresholds(db: Session, run_id: str, overrides: dict | None) -> dict:
     """在 validation 预测上模拟阈值（不落盘、不影响 Run 指标）。"""
     run = get_run(db, run_id)
@@ -328,7 +343,7 @@ def simulate_thresholds(db: Session, run_id: str, overrides: dict | None) -> dic
     y = df["true_label"].map({lab: i for i, lab in enumerate(labels)}).to_numpy(dtype=int)
 
     thresholds = Thresholds.from_dict(overrides)
-    metrics = route_metrics(probs, y, thresholds, labels)
+    metrics = route_metrics(probs, y, thresholds, labels, _run_effect_map(run))
     spec = (run.config or {}).get("threshold_search", {}).get("constraints", DEFAULT_SEARCH_SPEC["constraints"])
     violations = []
     fwr = metrics.get("false_write_rate") or 0.0
