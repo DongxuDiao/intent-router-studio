@@ -291,3 +291,59 @@ def ensure_training_labels(
                 422,
                 {"missing": missing, "present": sorted(present)},
             )
+
+
+def validate_label_schema_payload(payload: dict[str, Any], head_labels: list[str] | None = None) -> None:
+    """制品 label_schema.json 写盘前验证（Review 修复 §7.2）。
+
+    - labels 非空、无重复，且与分类头顺序逐位一致（head_labels 提供时）；
+    - 每个 label 在 label_definitions 中恰好出现一次（无缺失/多余/重复）；
+    - effect type 全部是平台固定枚举；
+    - schema_hash 与按制品定义重算的规范化文档哈希一致。
+
+    任何问题抛 ModelSchemaMismatch——Worker 打包阶段即失败，不发布制品。
+    """
+    problems: list[str] = []
+
+    labels = payload.get("labels") or []
+    if not labels or not all(isinstance(x, str) and x for x in labels):
+        problems.append("labels 为空或含非字符串项")
+    else:
+        dupes = sorted({k for k in labels if labels.count(k) > 1})
+        if dupes:
+            problems.append(f"labels 重复: {dupes[:5]}")
+        if head_labels is not None and list(head_labels) != list(labels):
+            problems.append(f"labels 与分类头顺序不一致: {list(labels)[:5]} != {list(head_labels)[:5]}")
+
+    definitions = [d for d in (payload.get("label_definitions") or []) if isinstance(d, dict) and d.get("key")]
+    def_keys = [str(d["key"]) for d in definitions]
+    if labels:
+        missing_defs = [lab for lab in labels if lab not in def_keys]
+        extra_defs = [k for k in def_keys if k not in labels]
+        if missing_defs:
+            problems.append(f"definitions 缺少标签映射: {missing_defs[:5]}")
+        if extra_defs:
+            problems.append(f"definitions 含分类头外标签: {sorted(set(extra_defs))[:5]}")
+    dup_defs = sorted({k for k in def_keys if def_keys.count(k) > 1})
+    if dup_defs:
+        problems.append(f"definitions 标签重复: {dup_defs[:5]}")
+
+    invalid_effects = sorted(
+        {f"{d['key']}->{d.get('effect_type')!r}" for d in definitions if d.get("effect_type") not in SYSTEM_EFFECT_TYPES}
+    )
+    if invalid_effects:
+        problems.append(f"effect_type 非法: {invalid_effects[:5]}")
+
+    if problems:
+        raise ModelSchemaMismatch(
+            f"label_schema.json 打包校验失败: {'; '.join(problems)}", {"problems": problems}
+        )
+
+    if labels and payload.get("schema_hash"):
+        rebuilt = document_from_json({"labels": [dict(d) for d in definitions]})
+        rebuilt.created_from = payload.get("created_from")  # 文档级字段同样参与哈希
+        if schema_hash(rebuilt) != payload["schema_hash"]:
+            raise ModelSchemaMismatch(
+                "schema_hash 与制品定义重算结果不一致",
+                {"declared": payload["schema_hash"], "recomputed": schema_hash(rebuilt)},
+            )

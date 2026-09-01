@@ -2,7 +2,8 @@
 
 - 每个项目一把读写锁保护模型引用
 - 激活新模型先在临时对象完成加载与 smoke inference，再原子替换
-- 进程内 LRU 缓存，key = sha256(model_version + threshold_version + 规范化文本)
+- 进程内 LRU 缓存，key = sha256(model_version + threshold_version + schema_id
+  + schema_hash + 规范化文本)——Schema 映射变化后旧结果不复用（Review 修复 §8.3）
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import numpy as np
 from app.router_core.calibration import calibrate
 from app.router_core.normalization import encode_input, normalize_text
 from app.router_core.policy import Thresholds, decide
+from app.router_core.system_effects import SYSTEM_EFFECT_TYPES
 
 
 class ModelRuntime:
@@ -33,12 +35,19 @@ class ModelRuntime:
         model_version_id: str,
         threshold_version_id: str | None = None,
         effect_map: dict[str, str] | None = None,
+        schema_id: str | None = None,
+        schema_hash: str | None = None,
+        label_names: dict[str, str] | None = None,
     ) -> None:
         self.model = model
         self.labels = list(labels)
         # 自定义意图标签 §6.8：标签→系统效果类型（来自制品 label_definitions；
         # 缺省恒等映射=五分类行为不变）；Policy 只信任该服务端映射
         self.effect_map = dict(effect_map) if effect_map else {}
+        # Review 修复 §7.3：预测结果携带 schema 溯源，便于诊断模型与项目 Schema 漂移
+        self.schema_id = schema_id
+        self.schema_hash = schema_hash
+        self.label_names = dict(label_names) if label_names else {}
         self.temperature = float(temperature)
         self.thresholds = thresholds
         self.model_version_id = model_version_id
@@ -68,12 +77,45 @@ class ModelRuntime:
         # （禁止回退固定五分类——分类头维度可能错位导致概率列张冠李戴）
         label_path = artifact_dir / "label_schema.json"
         labels: list[str] = []
+        schema: dict = {}
         if label_path.is_file():
             schema = json.loads(label_path.read_text(encoding="utf-8"))
             loaded = [item["key"] if isinstance(item, dict) else str(item) for item in schema.get("labels", [])]
             labels = loaded
         if not labels:
             raise RuntimeError(f"MODEL_SCHEMA_MISMATCH: 制品缺少合法 label_schema.json: {artifact_dir}")
+
+        # Review 修复 §7.3：加载期校验标签→效果映射，缺映射/非法映射直接拒绝加载。
+        # - v2 制品（intent-schema-v2）必须完整提供 label_definitions；
+        # - v1 制品（labels-v1 / 无 schema_format）允许恒等映射，但标签本身
+        #   必须是系统效果类型（否则说明是无映射的自定义标签，fail closed）；
+        #   未知标签不得静默落到恒然后继续 accept。
+        is_v2 = schema.get("schema_format") == "intent-schema-v2"
+        effect_map: dict[str, str] = {}
+        label_names: dict[str, str] = {}
+        def_keys: list[str] = []
+        for item in schema.get("label_definitions", []):
+            if isinstance(item, dict) and item.get("key"):
+                key = str(item["key"])
+                def_keys.append(key)
+                effect_map[key] = str(item.get("effect_type") or "")
+                label_names[key] = str(item.get("name") or key)
+        problems: list[str] = []
+        dup_defs = sorted({k for k in def_keys if def_keys.count(k) > 1})
+        if dup_defs:
+            problems.append(f"label_definitions 重复: {dup_defs[:5]}")
+        bad_effects = sorted({k for k, v in effect_map.items() if v not in SYSTEM_EFFECT_TYPES})
+        if bad_effects:
+            problems.append(f"effect_type 非法: {bad_effects[:5]}")
+        for lab in labels:
+            if lab in effect_map:
+                continue
+            if is_v2:
+                problems.append(f"v2 制品缺标签 {lab!r} 的 effect 映射")
+            elif lab not in SYSTEM_EFFECT_TYPES:
+                problems.append(f"标签 {lab!r} 无 effect 映射且不是系统效果类型")
+        if problems:
+            raise RuntimeError(f"MODEL_SCHEMA_MISMATCH: {'; '.join(problems)}: {label_path}")
 
         temperature = 1.0
         calib_path = artifact_dir / "calibration.json"
@@ -91,12 +133,6 @@ class ModelRuntime:
         # setfit 1.x 从本地目录加载用 from_pretrained（load_pretrained 已不存在）
         model = SetFitModel.from_pretrained(str(artifact_dir / "setfit_model"))
 
-        effect_map = {
-            item.get("key", ""): item.get("effect_type", item.get("key", ""))
-            for item in schema.get("label_definitions", [])
-            if isinstance(item, dict) and item.get("key")
-        } if label_path.is_file() else {}
-
         runtime = cls(
             model=model,
             labels=labels,
@@ -105,6 +141,9 @@ class ModelRuntime:
             thresholds=thresholds,
             model_version_id=model_version_id,
             threshold_version_id=manifest.get("threshold_version_id"),
+            schema_id=schema.get("schema_id"),
+            schema_hash=schema.get("schema_hash"),
+            label_names=label_names,
         )
         runtime.smoke_check()
         return runtime
@@ -140,6 +179,13 @@ class ModelRuntime:
         latency_ms = round((time.perf_counter() - start) * 1000, 2)
         result["model_version_id"] = self.model_version_id
         result["latency_ms"] = latency_ms
+        # Review 修复 §7.3/§9.1：携带 Schema 溯源；intent 升级为 {key, name}
+        # （name 来自制品 label_definitions），route=effect_type 兼容字段不变
+        result["schema_id"] = self.schema_id
+        result["schema_hash"] = self.schema_hash
+        if isinstance(result.get("intent"), str):
+            key = result["intent"]
+            result["intent"] = {"key": key, "name": self.label_names.get(key, key)}
         return result
 
 
@@ -240,11 +286,17 @@ class InferenceRuntime:
     ) -> dict[str, Any]:
         # 缓存只存基础路由结果；debug / cache_hit / latency_ms 均为请求级字段，不入缓存。
         # threshold_overrides 请求完全绕过共享缓存（不读也不写）。
+        # Review 修复 §8.3：键含 Schema 溯源——同一模型版本在 Schema 映射变化后
+        # 不得复用旧安全/路由结果。
         cache_key = hashlib.sha256(
             (
                 runtime.model_version_id
                 + "|"
                 + str(runtime.threshold_version_id)
+                + "|"
+                + str(getattr(runtime, "schema_id", None))
+                + "|"
+                + str(getattr(runtime, "schema_hash", None))
                 + "|"
                 + normalize_text(text)
                 + "|"
@@ -278,6 +330,8 @@ class InferenceRuntime:
                 "temperature": runtime.temperature,
                 "label_order": runtime.labels,
                 "threshold_version_id": runtime.threshold_version_id,
+                "schema_id": getattr(runtime, "schema_id", None),
+                "schema_hash": getattr(runtime, "schema_hash", None),
             }
         return result
 

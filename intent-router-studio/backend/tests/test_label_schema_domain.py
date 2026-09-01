@@ -155,3 +155,60 @@ def test_training_label_assertions_dynamic():
     assert exc.value.code == "MISSING_LABEL_CLASS"
     # 重复现 Run 不要求全覆盖时只校验越界
     ls.ensure_training_labels(["faq"], doc, require_all_active=False)
+
+
+# ---------------------------------------------------------------- 制品打包验证（Review 修复 §7.2）
+
+def _artifact_payload() -> dict:
+    doc = ls.LabelSchemaDocument(labels=[
+        _label("faq", "information", order=0),
+        _label("create_task", "write_action", order=10),
+    ])
+    normalized = ls.normalize(doc)
+    return {
+        "schema_format": ls.SCHEMA_FORMAT_V2,
+        "schema_id": "lsv_artifact",
+        "schema_hash": ls.schema_hash(normalized),
+        "labels": ["faq", "create_task"],
+        "label_definitions": normalized.to_dict()["labels"],
+    }
+
+
+def test_artifact_payload_valid_passes():
+    payload = _artifact_payload()
+    ls.validate_label_schema_payload(payload, head_labels=["faq", "create_task"])  # 不抛
+
+
+def test_artifact_payload_rejects_head_order_mismatch():
+    payload = _artifact_payload()
+    with pytest.raises(ls.ModelSchemaMismatch, match="分类头顺序不一致"):
+        ls.validate_label_schema_payload(payload, head_labels=["create_task", "faq"])
+
+
+def test_artifact_payload_rejects_incomplete_definitions():
+    payload = _artifact_payload()
+    payload["label_definitions"] = payload["label_definitions"][:1]
+    with pytest.raises(ls.ModelSchemaMismatch, match="缺少标签映射.*create_task"):
+        ls.validate_label_schema_payload(payload)
+
+
+def test_artifact_payload_rejects_invalid_effect():
+    payload = _artifact_payload()
+    payload["label_definitions"][1]["effect_type"] = "super_admin"
+    payload.pop("schema_hash")  # 跳过哈希检查，聚焦 effect 校验
+    with pytest.raises(ls.ModelSchemaMismatch, match="effect_type 非法"):
+        ls.validate_label_schema_payload(payload)
+
+
+def test_artifact_payload_rejects_hash_mismatch():
+    payload = _artifact_payload()
+    payload["schema_hash"] = "0" * 64
+    with pytest.raises(ls.ModelSchemaMismatch, match="schema_hash"):
+        ls.validate_label_schema_payload(payload)
+
+
+def test_artifact_payload_rejects_duplicate_definitions():
+    payload = _artifact_payload()
+    payload["label_definitions"] = payload["label_definitions"] + [dict(payload["label_definitions"][0])]
+    with pytest.raises(ls.ModelSchemaMismatch, match="重复"):
+        ls.validate_label_schema_payload(payload)

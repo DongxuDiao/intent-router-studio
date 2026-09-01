@@ -129,8 +129,64 @@ def test_runtime_loads_custom_label_artifact(tmp_path, monkeypatch):
     assert runtime.labels == labels  # 顺序即制品数组顺序（分类头契约）
     result = runtime.predict("查一下状态")
     # 两层契约：intent 是业务标签（桩模型 top1 恒为第 0 列），route=effect_type
-    assert result["intent"] == labels[0]
+    assert result["intent"] == {"key": labels[0], "name": labels[0]}  # 无 name 时回退 key
     assert result["effect_type"] == "information" and result["route"] == "information"
+    # Review 修复 §7.3：预测结果携带 Schema 溯源
+    assert result["schema_id"] == "lsv_x" and result["schema_hash"] == "abc"
+
+
+def test_runtime_intent_object_carries_definition_name(tmp_path, monkeypatch):
+    """§9.1：intent.name 来自制品 label_definitions 的展示名。"""
+    payload = {
+        "schema_format": "intent-schema-v2", "schema_id": "lsv_y", "schema_hash": "def",
+        "labels": ["faq", "create_task"],
+        "label_definitions": [
+            {"key": "faq", "name": "常见问题", "effect_type": "information"},
+            {"key": "create_task", "name": "创建任务", "effect_type": "write_action"},
+        ],
+    }
+    _artifact_with_labels(tmp_path, monkeypatch, payload)
+    runtime = ModelRuntime.load(tmp_path, "mdl_y", verify=True)
+    result = runtime.predict("什么是实验？")
+    assert result["intent"] == {"key": "faq", "name": "常见问题"}
+
+
+def test_runtime_rejects_v2_artifact_missing_effect_mapping(tmp_path, monkeypatch):
+    """§10.1-4：v2 制品缺 effect mapping（definitions 不完整）加载即失败。"""
+    payload = {
+        "schema_format": "intent-schema-v2", "schema_id": "lsv_z", "schema_hash": "xyz",
+        "labels": ["faq", "create_task"],
+        "label_definitions": [{"key": "faq", "effect_type": "information"}],  # 缺 create_task
+    }
+    _artifact_with_labels(tmp_path, monkeypatch, payload)
+    with pytest.raises(RuntimeError, match="MODEL_SCHEMA_MISMATCH.*create_task"):
+        ModelRuntime.load(tmp_path, "mdl_z", verify=True)
+
+
+def test_runtime_rejects_invalid_effect_type_in_definitions(tmp_path, monkeypatch):
+    """definitions 里出现平台外 effect type：加载失败（不静默接受）。"""
+    payload = {
+        "schema_format": "intent-schema-v2", "schema_id": "lsv_w", "schema_hash": "www",
+        "labels": ["faq", "create_task"],
+        "label_definitions": [
+            {"key": "faq", "effect_type": "information"},
+            {"key": "create_task", "effect_type": "super_admin"},  # 平台外
+        ],
+    }
+    _artifact_with_labels(tmp_path, monkeypatch, payload)
+    with pytest.raises(RuntimeError, match="MODEL_SCHEMA_MISMATCH"):
+        ModelRuntime.load(tmp_path, "mdl_w", verify=True)
+
+
+def test_runtime_rejects_unmapped_custom_label_without_definitions(tmp_path, monkeypatch):
+    """无 definitions 的自定义标签（v1 形状）：加载失败，不回退恒等映射。"""
+    payload = {
+        "schema_version": "labels-v1",
+        "labels": ["read_only", "create_task"],  # read_only 恒等合法；create_task 无映射
+    }
+    _artifact_with_labels(tmp_path, monkeypatch, payload)
+    with pytest.raises(RuntimeError, match="MODEL_SCHEMA_MISMATCH.*create_task"):
+        ModelRuntime.load(tmp_path, "mdl_v", verify=True)
 
 
 def test_runtime_accepts_legacy_v1_artifact(tmp_path, monkeypatch):

@@ -6,7 +6,7 @@ import { api, ApiError } from '../api/client'
 import { LabelTag, PageHeader, ProbBars } from '../components/common'
 import { QueryRewritePanel } from '../components/rewrite'
 import { useProject } from '../store/project'
-import { EFFECT_CEILING_NAMES, GATE_NAMES, LABELS, LABEL_NAMES } from '../types'
+import { EFFECT_CEILING_NAMES, GATE_NAMES, LABELS, LABEL_NAMES, intentName, isWriteEffect } from '../types'
 import type { ModelVersion, PredictResult } from '../types'
 import { fmtMs, fmtTime } from '../utils/format'
 import {
@@ -22,15 +22,18 @@ import {
 function ResultPanel({ title, r }: { title: string; r: PredictResult | null }) {
   if (!r) return <Card title={title} size="small"><Typography.Text type="secondary">待推理</Typography.Text></Card>
   const accept = r.decision === 'accept'
+  const intentNameText = intentName(r)
   return (
     <Card
       title={title}
       size="small"
-      extra={accept ? <Tag color={r.route === 'write_action' ? 'warning' : 'success'}>accept · {LABEL_NAMES[r.route] ?? r.route}</Tag> : <Tag color="purple">unclear · 转人工</Tag>}
+      extra={accept ? <Tag color={isWriteEffect(r) ? 'warning' : 'success'}>accept · {LABEL_NAMES[r.route] ?? r.route}</Tag> : <Tag color="purple">unclear · 转人工</Tag>}
     >
       <Space direction="vertical" size={6} style={{ width: '100%' }}>
         <ProbBars topK={r.top_k} />
         <Descriptions size="small" column={2}>
+          <Descriptions.Item label="意图">{intentNameText ? <Tag color="geekblue">{intentNameText}</Tag> : '-'}</Descriptions.Item>
+          <Descriptions.Item label="系统效果">{LABEL_NAMES[r.route] ?? r.route}</Descriptions.Item>
           <Descriptions.Item label="confidence">{r.confidence.toFixed(4)}</Descriptions.Item>
           <Descriptions.Item label="margin">{r.margin.toFixed(4)}</Descriptions.Item>
           <Descriptions.Item label="效果上限">{EFFECT_CEILING_NAMES[r.effect_ceiling] ?? r.effect_ceiling}</Descriptions.Item>
@@ -45,7 +48,7 @@ function ResultPanel({ title, r }: { title: string; r: PredictResult | null }) {
             ))}
           </div>
         )}
-        {r.route === 'write_action' && accept && (
+        {isWriteEffect(r) && accept && (
           <Alert type="warning" showIcon message="write_action 仅为候选：需用户显式确认后才可能进入写流程，本系统不执行任何外部写入" />
         )}
       </Space>

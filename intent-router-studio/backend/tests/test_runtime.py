@@ -32,10 +32,12 @@ def _build_artifact(tmp_path, monkeypatch) -> None:
     (model_dir / "config.json").write_text('{"model_type": "stub"}', encoding="utf-8")
     artifact_service.write_json(tmp_path / "thresholds.json", Thresholds().to_dict())
     # Phase 2 §6.7：制品必须携带标签顺序（缺失 fail closed），manifest 覆盖其哈希
+    # Review 修复 §7.3：v2 制品必须完整提供 label_definitions（恒等五分类）
     artifact_service.write_json(
         tmp_path / "label_schema.json",
         {"schema_format": "intent-schema-v2", "schema_id": None, "schema_hash": None,
-         "labels": list(LABELS), "label_definitions": []},
+         "labels": list(LABELS),
+         "label_definitions": [{"key": k, "effect_type": k} for k in LABELS]},
     )
     artifact_service.build_manifest(tmp_path, {"run_id": "run_test"})
 

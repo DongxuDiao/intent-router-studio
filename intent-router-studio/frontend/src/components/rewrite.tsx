@@ -9,6 +9,7 @@ import {
   LABEL_NAMES,
   REWRITE_MODE_NAMES,
   REWRITE_REASON_NAMES,
+  intentName,
   type QueryUnderstanding,
   type RewriteMode,
 } from '../types'
@@ -318,6 +319,15 @@ export function QueryRewritePanel({ projectId }: { projectId: string }) {
                 {u.rewrite_route ? <LabelTag label={u.rewrite_route.route} /> : <Tag>未评估</Tag>}
                 <Tag color={u.route_consistent ? 'success' : 'warning'} style={{ fontSize: 11 }}>
                   {u.route_consistent ? '一致' : '不一致（保留原文）'}
+                </Tag>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Typography.Text type="secondary" style={{ width: 120, fontSize: 12 }}>业务意图</Typography.Text>
+                <Tag style={{ fontSize: 11 }}>{intentName(u.original_route) ?? '-'}</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>→</Typography.Text>
+                <Tag style={{ fontSize: 11 }}>{u.rewrite_route ? intentName(u.rewrite_route) ?? '-' : '未评估'}</Tag>
+                <Tag color={u.intent_consistent === false ? 'orange' : 'default'} style={{ fontSize: 11 }}>
+                  {u.intent_consistent === false ? '意图漂移（仅记录，效果层见上）' : '意图一致'}
                 </Tag>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

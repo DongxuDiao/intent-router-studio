@@ -105,7 +105,12 @@ class SafetyDecision(BaseModel):
 
 
 def route_policy(original_route: str, rewrite_route: str) -> RoutePolicy:
-    """§7.3 一致性矩阵。downstream_rewrite_allowed 仅表示"路由维度不阻止"。"""
+    """§7.3 一致性矩阵。downstream_rewrite_allowed 仅表示"路由维度不阻止"。
+
+    Review 修复 §8.1：两个入参均为系统效果类型（effect_type，服务端 Schema
+    映射结果），不是业务意图标签名——自定义意图下标签名漂移不代表效果漂移，
+    反之效果升级必须无条件硬拦截。
+    """
     base: dict[str, object] = {"formal_route": original_route}
     if original_route == rewrite_route:
         return RoutePolicy(**base, conflict=False, downstream_rewrite_allowed=True, note="路由一致")

@@ -70,7 +70,8 @@ METRICS: dict[str, Any] = {
     "requests_total": 0,
     "success_total": 0,
     "fallback_total": {},        # reason -> count
-    "route_conflict_total": {},  # "from->to" -> count
+    "route_conflict_total": {},  # "from->to" -> count（效果层）
+    "intent_drift_total": {},    # "from->to" -> count（业务意图层，Review 修复 §8.1）
     "safety_reject_total": {},   # reason -> count
     "cache_hit_total": 0,
     "latency_samples": deque(maxlen=500),
@@ -119,7 +120,7 @@ def reset_client() -> None:
     CACHE.clear()
     for key in ("requests_total", "success_total", "cache_hit_total"):
         METRICS[key] = 0
-    for key in ("fallback_total", "route_conflict_total", "safety_reject_total"):
+    for key in ("fallback_total", "route_conflict_total", "intent_drift_total", "safety_reject_total"):
         METRICS[key] = {}
     METRICS["latency_samples"].clear()
 
@@ -136,6 +137,7 @@ def metrics_snapshot() -> dict[str, Any]:
         "success_total": METRICS["success_total"],
         "fallback_total": dict(METRICS["fallback_total"]),
         "route_conflict_total": dict(METRICS["route_conflict_total"]),
+        "intent_drift_total": dict(METRICS["intent_drift_total"]),
         "safety_reject_total": dict(METRICS["safety_reject_total"]),
         "cache_hit_total": METRICS["cache_hit_total"],
         "rewrite_latency_ms": {"p50": p50, "p95": p95, "n": len(samples)},
@@ -424,6 +426,27 @@ def _decide_downstream(mode: str, safety: SafetyDecision, rewrite: RewriteResult
     return rewrite.original_query, "original", safety.safety_decision
 
 
+def _effect_of(result: dict | None) -> str:
+    """路由结果 → 系统效果类型（Review 修复 §8.1）。
+
+    route 是 effect_type 的兼容字段；优先读显式 effect_type，
+    旧形状/桩结果退回 route，最终兜底 unclear（fail closed）。
+    """
+    if not isinstance(result, dict):
+        return "unclear"
+    return str(result.get("effect_type") or result.get("route") or "unclear")
+
+
+def _intent_key(result: dict | None) -> str | None:
+    """路由结果 → 业务意图 key（§9.1 起 intent 为 {key, name} 对象）。"""
+    if not isinstance(result, dict):
+        return None
+    intent = result.get("intent")
+    if isinstance(intent, dict):
+        return str(intent.get("key") or "") or None
+    return str(intent) if intent else None
+
+
 def understand_query(
     db: Session,
     project_id: str,
@@ -470,12 +493,14 @@ def understand_query(
 
     def evaluate(candidate: str, changed: bool, provider_output: ProviderOutput | None):
         rewrite_route = predict_fn(candidate, None) if candidate != normalized else original_result
+        # Review 修复 §8.1：安全门比较系统效果类型（服务端 Schema 映射结果），
+        # 不比较业务标签名——自定义意图下标签名漂移不代表效果漂移
         safety = evaluate_rewrite_safety(
             original=text,
             context=context,
             rewrite=candidate,
-            original_route=original_result["route"],
-            rewrite_route=rewrite_route["route"],
+            original_route=_effect_of(original_result),
+            rewrite_route=_effect_of(rewrite_route),
             provider_output=provider_output,
             confidence_threshold=float(config["min_rewrite_confidence"]),
             require_route_consistency=bool(config.get("require_route_consistency", True)),
@@ -506,6 +531,11 @@ def understand_query(
         provider_connection_revision=provider_spec.get("revision"),
         model_id=provider_spec.get("model_id"),
         generation_config_hash=provider_spec.get("generation_config_hash"),
+        # Review 修复 §8.3：路由上下文入键，Schema/阈值变化后不复用旧安全摘要
+        router_model_version_id=getattr(runtime, "model_version_id", None),
+        router_schema_id=getattr(runtime, "schema_id", None),
+        router_schema_hash=getattr(runtime, "schema_hash", None),
+        router_threshold_version_id=getattr(runtime, "threshold_version_id", None),
     )
     cached = CACHE.get(cache_key)
     if cached is not None:
@@ -631,6 +661,10 @@ def _finalize(
     _metrics_inc("success_total")
     if safety is not None and safety.route_conflict and rewrite_route is not None:
         _metrics_inc("route_conflict_total", f"{original_result['route']}->{rewrite_route['route']}")
+    # Review 修复 §8.1：业务意图漂移单独记录（effect 一致仅代表效果层未漂移）
+    intent_consistent = True if rewrite_route is None else _intent_key(original_result) == _intent_key(rewrite_route)
+    if rewrite_route is not None and not intent_consistent:
+        _metrics_inc("intent_drift_total", f"{_effect_of(original_result)}->{_effect_of(rewrite_route)}")
     if safety is not None:
         for code in safety.reason_codes:
             if code in (
@@ -662,6 +696,7 @@ def _finalize(
             if rewrite_route is None
             else original_result["route"] == rewrite_route["route"]
         ),
+        "intent_consistent": intent_consistent,
         "downstream_query": downstream,
         "downstream_query_source": source,
         "safety_decision": decision,

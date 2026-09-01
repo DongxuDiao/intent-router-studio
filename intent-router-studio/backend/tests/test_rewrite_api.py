@@ -95,14 +95,10 @@ def _stub_output(standalone: str, **kw) -> dict:
     return base
 
 
-@pytest.fixture
-def runtime(project_id, db):
-    rt = _ScriptedRuntime()
+def _install_active_runtime(db, project_id, rt) -> None:
+    """注册一个真实 ACTIVE 模型行（FK 链 Project → DatasetVersion → TrainingRun
+    → ModelVersion）并把项目指针指向它，运行时已注入、制品路径无需存在。"""
     rt.model_version_id = ids.prefixed(ids.MODEL)
-    # V2 §3.5：运行时缓存必须与 project.active_model_id 一致，否则会被
-    # ensure_project_runtime 判定为陈旧缓存弃用。这里注册一个真实 ACTIVE
-    # 模型行（FK 需要完整链 Project → DatasetVersion → TrainingRun → ModelVersion）
-    # 并把项目指针指向它，模型制品路径无需真实存在（运行时已注入，不会加载）。
     dataset = DatasetVersion(
         id=ids.prefixed(ids.DATASET),
         project_id=project_id,
@@ -135,6 +131,14 @@ def runtime(project_id, db):
     project.active_model_id = model.id
     db.commit()
     inference_service.RUNTIME.set(project_id, rt)
+
+
+@pytest.fixture
+def runtime(project_id, db):
+    # V2 §3.5：运行时缓存必须与 project.active_model_id 一致，否则会被
+    # ensure_project_runtime 判定为陈旧缓存弃用。
+    rt = _ScriptedRuntime()
+    _install_active_runtime(db, project_id, rt)
     yield rt
     inference_service.RUNTIME.evict(project_id)
     inference_service.RUNTIME.cache.clear()
@@ -596,3 +600,107 @@ def test_mode_override_per_request(client, project_id, runtime, install_rewriter
     assert data["mode"] == "off"
     assert data["safety_decision"] == "mode_off"
     assert data["downstream_query"] == "这个怎么停？"
+
+
+# ---------------------------------------------------------------- 两层安全门（Review 修复 §8.1）
+
+class _CustomIntentRuntime:
+    """自定义意图桩运行时：返回 §9.1 形状（intent 对象 + effect_type）。
+
+    意图→效果映射：task_create/deploy_cmd → write_action；status_query/log_query
+    → read_only；faq/doc_qa → information。安全门必须按 effect 而非标签名判断。
+    """
+
+    model_version_id = "mdl_custom0001"
+    threshold_version_id = "thv_custom0001"
+    schema_id = "lsv_custom0001"
+    schema_hash = "hash_custom01"
+    EFFECTS = {
+        "task_create": "write_action", "deploy_cmd": "write_action",
+        "status_query": "read_only", "log_query": "read_only",
+        "faq": "information", "doc_qa": "information",
+    }
+    NAMES = {
+        "task_create": "创建任务", "status_query": "查询状态",
+        "faq": "常见问题", "doc_qa": "文档问答",
+    }
+
+    def _intent(self, text: str) -> str:
+        if "创建任务" in text or "部署" in text:
+            return "task_create"
+        if "定义" in text:
+            return "doc_qa"
+        if "什么" in text or "为什么" in text:
+            return "faq"
+        return "status_query"
+
+    def predict(self, text, context=None, threshold_overrides=None):
+        intent = self._intent(text)
+        effect = self.EFFECTS[intent]
+        return {
+            "intent": {"key": intent, "name": self.NAMES.get(intent, intent)},
+            "route": effect,
+            "effect_type": effect,
+            "decision": "accept",
+            "confidence": 0.91,
+            "margin": 0.61,
+            "model_version_id": self.model_version_id,
+            "schema_id": self.schema_id,
+            "schema_hash": self.schema_hash,
+            "latency_ms": 0.05,
+        }
+
+
+@pytest.fixture
+def custom_runtime(project_id, db):
+    rt = _CustomIntentRuntime()
+    _install_active_runtime(db, project_id, rt)
+    yield rt
+    inference_service.RUNTIME.evict(project_id)
+    inference_service.RUNTIME.cache.clear()
+
+
+def test_custom_intent_read_to_write_drift_blocked(client, project_id, custom_runtime, install_rewriter):
+    """§10.1-7：read intent 漂移到 write intent（不同业务标签）被硬拦截。
+
+    原文 status_query(read_only) → 改写 task_create(write_action)：标签名与
+    效果都漂移，安全门按效果升级硬拦截，downstream/final 保持原文。"""
+    install_rewriter(
+        responses=lambda body: httpx.Response(200, json=_reply_payload(_stub_output("帮我创建任务 123")))
+    )
+    _put_config(client, project_id, mode="safe_apply")
+    resp = client.post(
+        "/api/v1/inference/rewrite",
+        json={"project_id": project_id, "text": "帮我查看任务 123 的创建状态", "context": None},
+    )
+    data = resp.json()
+    assert data["original_route"]["effect_type"] == "read_only"
+    assert data["rewrite_route"]["effect_type"] == "write_action"
+    assert data["safety"]["escalation"] is True
+    assert data["safety"]["allow"] is False
+    assert "ROUTE_CONFLICT" in data["safety"]["reason_codes"]
+    assert data["downstream_query"] == "帮我查看任务 123 的创建状态"
+    assert data["final_route"] == "read_only"
+    # 业务意图层漂移同样被记录（不替代安全判断）
+    assert data["intent_consistent"] is False
+
+
+def test_same_effect_intent_drift_not_route_conflict(client, project_id, custom_runtime, install_rewriter):
+    """同效果内的意图漂移（faq → doc_qa，均 information）：路由层不冲突，
+    漂移只记录在 intent_consistent，不构成安全拦截依据。"""
+    install_rewriter(
+        responses=lambda body: httpx.Response(200, json=_reply_payload(_stub_output("任务 123 的定义是什么")))
+    )
+    _put_config(client, project_id, mode="shadow")
+    resp = client.post(
+        "/api/v1/inference/rewrite",
+        json={"project_id": project_id, "text": "任务 123 是什么", "context": None},
+    )
+    data = resp.json()
+    assert data["original_route"]["intent"]["key"] == "faq"
+    assert data["rewrite_route"]["intent"]["key"] == "doc_qa"
+    assert data["route_consistent"] is True
+    assert data["intent_consistent"] is False
+    assert data["safety"]["route_policy"]["conflict"] is False
+    assert data["safety"]["escalation"] is False
+    assert data["final_route"] == "information"

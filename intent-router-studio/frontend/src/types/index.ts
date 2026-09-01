@@ -334,24 +334,49 @@ export interface ModelVersion {
 
 export interface PredictResult {
   route: string
+  /** 固定系统效果类型（route 的正式字段；写警告一律判它，不判业务标签名） */
+  effect_type?: string
+  /** 业务意图：兼容期对象 {key, name}；旧缓存/旧模型可能是字符串 */
+  intent?: { key: string; name: string } | string
   decision: 'accept' | 'unclear'
   confidence: number
   margin: number
-  top_k: { label: string; probability: number }[]
+  top_k: { label: string; effect_type?: string | null; probability: number }[]
   reason_codes: string[]
   effect_ceiling: string
   required_next_gate: string
   latency_ms: number
   model_version: string
   model_version_id?: string
+  schema_id?: string | null
+  schema_hash?: string | null
   cache_hit?: boolean
   debug?: {
     thresholds_applied: Thresholds
     temperature: number
     label_order: string[]
     threshold_version_id: string | null
+    schema_id?: string | null
+    schema_hash?: string | null
   }
   request_id?: string
+}
+
+/** 取业务意图 key（兼容 intent 为字符串的旧结果） */
+export function intentKey(r: PredictResult | null | undefined): string | null {
+  if (!r?.intent) return null
+  return typeof r.intent === 'string' ? r.intent : r.intent.key
+}
+
+/** 取业务意图展示名（兼容 intent 为字符串的旧结果） */
+export function intentName(r: PredictResult | null | undefined): string | null {
+  if (!r?.intent) return null
+  return typeof r.intent === 'string' ? r.intent : r.intent.name
+}
+
+/** 是否写效果：一律判系统 effect_type（Review 修复 §9.2），不判标签名 */
+export function isWriteEffect(r: PredictResult | null | undefined): boolean {
+  return (r?.effect_type ?? r?.route) === 'write_action'
 }
 
 export interface ThresholdVersionInfo {
@@ -474,6 +499,8 @@ export interface QueryUnderstanding {
   original_route: PredictResult
   rewrite_route: PredictResult | null
   route_consistent: boolean
+  /** Review 修复 §8.1：业务意图漂移单独记录（false 不代表安全拦截） */
+  intent_consistent?: boolean
   downstream_query: string
   downstream_query_source: 'original' | 'rewrite'
   safety_decision: string

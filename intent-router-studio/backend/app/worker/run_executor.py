@@ -26,7 +26,7 @@ from app.router_core.evaluation import (
     latency_stats,
     slice_metrics,
 )
-from app.router_core.label_schema import ensure_training_labels
+from app.router_core.label_schema import ensure_training_labels, validate_label_schema_payload
 from app.router_core.normalization import encode_input
 from app.router_core.policy import Thresholds, decide
 from app.router_core.splitting import ensure_splits_trainable
@@ -541,17 +541,23 @@ class RunExecutor:
         # ---------- PACKAGING ----------
         log.progress(RunStatus.PACKAGING, 93, "保存模型制品")
         router.save_pretrained(workdir / "setfit_model")
-        # §6.5：制品保存完整 Schema 快照（顺序=分类头顺序）与 hash
-        artifact_service.write_json(
-            workdir / "label_schema.json",
-            {
-                "schema_format": schema.document.schema_format,
-                "schema_id": schema.schema_id,
-                "schema_hash": schema.schema_hash,
-                "labels": label_order,
-                "label_definitions": schema.document.to_dict()["labels"],
-            },
-        )
+        if list(label_order) != list(schema_label_order):
+            raise RuntimeError(
+                f"分类头标签顺序与 Schema 不一致: {label_order} != {schema_label_order}"
+            )
+        # §6.5：制品保存完整 Schema 快照（顺序=分类头顺序）与 hash；
+        # Review 修复 §7.2：写盘前验证维度/映射/哈希，失败即 Run 失败不发布
+        schema_payload = {
+            "schema_format": schema.document.schema_format,
+            "schema_id": schema.schema_id,
+            "schema_hash": schema.schema_hash,
+            "labels": list(label_order),
+            "label_definitions": schema.document.to_dict()["labels"],
+        }
+        if schema.document.created_from:
+            schema_payload["created_from"] = schema.document.created_from
+        validate_label_schema_payload(schema_payload, head_labels=list(label_order))
+        artifact_service.write_json(workdir / "label_schema.json", schema_payload)
         artifact_service.write_json(
             workdir / "calibration.json",
             {
