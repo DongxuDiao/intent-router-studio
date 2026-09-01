@@ -26,6 +26,7 @@ from app.models import (
 from app.router_core.label_schema import (
     LabelDefinition,
     LabelSchemaDocument,
+    ResolvedLabelSchema,
     default_compat_document,
     document_from_json,
     normalize,
@@ -70,6 +71,46 @@ def active_document(db: Session, project_id: str) -> tuple[LabelSchemaVersion | 
     if row is None:
         return None, default_compat_document()
     return row, resolve_document(row)
+
+
+# ---------------------------------------------------------------- 统一运行时上下文（Review 修复 §2）
+
+def resolve_schema_context(row: LabelSchemaVersion) -> ResolvedLabelSchema:
+    return ResolvedLabelSchema.from_document(resolve_document(row), row.id, row.hash)
+
+
+def _compat_context() -> ResolvedLabelSchema:
+    """历史 v1 数据的恒等五分类适配（仅读取路径；新 Run 由 create_run 拦截）。"""
+    doc = default_compat_document()
+    return ResolvedLabelSchema.from_document(doc, None, schema_hash(doc))
+
+
+def resolve_project_active_schema(db: Session, project_id: str) -> ResolvedLabelSchema:
+    """项目入口：仅用于创建新数据集或新迁移任务（当前 Active Schema）。"""
+    row = get_active_row(db, project_id)
+    if row is None:
+        raise NotFoundError("LabelSchemaVersion", f"project:{project_id}:active")
+    return resolve_schema_context(row)
+
+
+def resolve_dataset_schema(db: Session, dataset: DatasetVersion) -> ResolvedLabelSchema:
+    """已存在数据集的查看/编辑/校验/切分/训练入口：只认 dataset.schema_id。
+
+    - 绑定版本不可变：项目发布新 Schema 不影响旧数据集；
+    - schema_id 缺失视为历史 v1 数据，仅读取路径兼容适配恒等五分类；
+      启动新 Run 在 run_service.create_run 以 DATASET_SCHEMA_MISMATCH 拦截。
+    """
+    if dataset.schema_id:
+        row = db.get(LabelSchemaVersion, dataset.schema_id)
+        if row is None or row.project_id != dataset.project_id:
+            raise ApiError(
+                "DATASET_SCHEMA_MISMATCH",
+                f"数据集绑定的标签 Schema 不存在: {dataset.schema_id}",
+                409,
+                {"schema_id": dataset.schema_id, "dataset_id": dataset.id},
+            )
+        return resolve_schema_context(row)
+    return _compat_context()
 
 
 def _get_row(db: Session, project_id: str, schema_id: str) -> LabelSchemaVersion:

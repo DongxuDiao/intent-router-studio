@@ -144,7 +144,6 @@ def test_publish_switches_pointer_and_supersedes(db, client, project_id):
 
 
 def test_publish_rejects_identical_content(db, client, project_id):
-    active = _active(db, project_id)
     draft = _draft(client, project_id)  # 基于 active 同内容创建
     resp = client.post(f"/api/v1/projects/{project_id}/label-schemas/{draft['id']}/publish",
                        json={"expected_hash": draft["hash"]})

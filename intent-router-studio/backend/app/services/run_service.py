@@ -16,7 +16,6 @@ from app.constants import TERMINAL_RUN_STATUSES, ModelStatus, RunStatus
 from app.errors import ApiError, NotFoundError
 from app.models import AuditEvent, DatasetSplit, DatasetVersion, ModelVersion, Project, RunEvent, ThresholdVersion, TrainingRun
 from app.router_core.policy import Thresholds
-from app.router_core.taxonomy import LABELS
 from app.router_core.threshold_search import DEFAULT_SEARCH_SPEC, route_metrics
 from app.router_core.training import TrainConfig, build_resource_plan
 from app.services import artifact_service, dataset_service
@@ -71,6 +70,18 @@ def create_run(db: Session, project_id: str, dataset_version_id: str, name: str,
     if dataset.status != "FROZEN":
         raise ApiError("DATASET_NOT_FROZEN", "训练只能使用已冻结的数据集版本", 409)
 
+    # Review 修复 §7.1：无 Schema 数据集禁止启动新 Run（历史数据需先迁移回填）
+    if not dataset.schema_id:
+        raise ApiError(
+            "DATASET_SCHEMA_MISMATCH",
+            "数据集未绑定标签 Schema（历史数据需迁移回填），禁止启动训练",
+            409,
+            {"dataset_id": dataset.id},
+        )
+    from app.services.label_schema_service import resolve_dataset_schema
+
+    schema = resolve_dataset_schema(db, dataset)
+
     report = dataset_service.latest_report(db, dataset_version_id)
     if report and report.get("errors"):
         raise ApiError(
@@ -81,11 +92,11 @@ def create_run(db: Session, project_id: str, dataset_version_id: str, name: str,
         )
 
     distribution = dataset.label_distribution or {}
-    missing = [lab for lab in LABELS if not distribution.get(lab)]
+    missing = [lab for lab in schema.label_keys if not distribution.get(lab)]
     if missing:
         raise ApiError(
             "MISSING_CLASS",
-            f"数据集缺少类别 {missing}，五分类训练需要全部类别样本",
+            f"数据集缺少类别 {missing}，训练需要 Schema 全部类别样本",
             409,
             {"missing": missing, "distribution": distribution},
         )

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +29,56 @@ MAX_ACTIVE_LABELS = 100
 # 系统效果类型 key 本身合法（v1 恒等映射），自定义 key 不能与其冲突？
 # 方案未禁止同名：v1 恒等标签与自定义标签同 key 会造成歧义，禁止。
 RESERVED_SYSTEM_KEYS = frozenset({"nota"})
+
+
+class ModelSchemaMismatch(ApiError):
+    """Schema 映射缺失/非法：fail closed，禁止按普通标签继续（Review 修复 §2）。"""
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__("MODEL_SCHEMA_MISMATCH", message, 500, details or {})
+
+
+@dataclass(frozen=True)
+class ResolvedLabelSchema:
+    """统一不可变 Schema 运行时上下文（Review 修复 §2）。
+
+    - label_keys 顺序即分类头顺序；
+    - effect_by_label 只能由服务端 Schema 解析，禁止各模块自行拼装；
+    - 未知标签 / 非法 effect type 一律 fail closed。
+    """
+
+    schema_id: str | None
+    schema_hash: str
+    label_keys: tuple[str, ...]
+    effect_by_label: Mapping[str, str]
+    document: LabelSchemaDocument = field(repr=False)  # 完整文档（名称/示例），打包与展示用
+
+    def effect_type_for(self, label: str) -> str:
+        effect = self.effect_by_label.get(label)
+        if effect not in SYSTEM_EFFECT_TYPES:
+            raise ModelSchemaMismatch(
+                f"标签 {label!r} 缺少合法 effect 映射",
+                {"label": label, "schema_id": self.schema_id},
+            )
+        return effect
+
+    def labels_for_effect(self, effect_type: str) -> tuple[str, ...]:
+        return tuple(k for k in self.label_keys if self.effect_by_label.get(k) == effect_type)
+
+    @classmethod
+    def from_document(
+        cls,
+        doc: LabelSchemaDocument,
+        schema_id: str | None,
+        hash_value: str | None = None,
+    ) -> ResolvedLabelSchema:
+        return cls(
+            schema_id=schema_id,
+            schema_hash=hash_value or schema_hash(doc),
+            label_keys=tuple(doc.label_keys_in_order()),
+            effect_by_label={d.key: d.effect_type for d in doc.labels},
+            document=doc,
+        )
 
 
 @dataclass

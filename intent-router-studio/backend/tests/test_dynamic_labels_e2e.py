@@ -14,6 +14,7 @@ from app.errors import ApiError
 from app.router_core.policy import Thresholds
 from app.router_core.runtime import ModelRuntime
 from app.services import artifact_service, dataset_service
+from tests.test_runtime import _StubSetFitModel  # noqa: PLC0415 复用桩模型
 
 
 class _DimStubModel:
@@ -24,19 +25,14 @@ class _DimStubModel:
 
     def predict_proba(self, texts: list[str]) -> np.ndarray:
         rows = []
-        for t in texts:
+        for _t in texts:
             row = np.full(self.n, 0.05)
             row[0] = 0.75
             rows.append(row)
         return np.array(rows)
 
 
-from tests.test_runtime import _StubSetFitModel  # noqa: PLC0415 复用桩模型
-
-
 def _publish_two_class(client, project_id) -> str:
-    detail = client.get(f"/api/v1/projects/{project_id}/label-schemas/active").json()
-    labels = [dict(lb) for lb in detail["document"]["labels"]]
     new_labels = [
         {"key": "faq", "name": "常见问题", "effect_type": "information", "order": 0},
         {"key": "create_task", "name": "创建任务", "effect_type": "write_action", "order": 10},

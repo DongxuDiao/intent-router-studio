@@ -26,7 +26,7 @@ from app.router_core.evaluation import (
     latency_stats,
     slice_metrics,
 )
-from app.router_core.label_schema import default_compat_document, ensure_training_labels
+from app.router_core.label_schema import ensure_training_labels
 from app.router_core.normalization import encode_input
 from app.router_core.policy import Thresholds, decide
 from app.router_core.splitting import ensure_splits_trainable
@@ -295,15 +295,13 @@ class RunExecutor:
             texts_by_split[split_name] = [encode_input(t, c) for t, c in zip(sub["text"], sub["context"].where(sub["context"].notna(), None), strict=True)]
             labels_by_split[split_name] = sub["label"].tolist()
 
-        # 自定义意图标签 §6.5：训练标签契约按数据集绑定 Schema 校验
-        # （数据集缺失 Schema 时按兼容五分类处理，旧数据集行为不变）
-        from app.models import LabelSchemaVersion as _LSV
-        from app.services.label_schema_service import resolve_document as _resolve
+        # 自定义意图标签 §6.5 / Review 修复 §7.1：训练只认数据集绑定 Schema；
+        # 无 schema_id 的历史 v1 数据仅读取兼容（create_run 已拦截新 Run）
+        from app.services.label_schema_service import resolve_dataset_schema
 
-        schema_row = db.get(_LSV, dataset.schema_id) if getattr(dataset, "schema_id", None) else None
-        schema_doc = _resolve(schema_row) if schema_row is not None else default_compat_document()
-        schema_label_order = schema_doc.label_keys_in_order()
-        ensure_training_labels(labels_by_split["train"], schema_doc)
+        schema = resolve_dataset_schema(db, dataset)
+        schema_label_order = list(schema.label_keys)
+        ensure_training_labels(labels_by_split["train"], schema.document)
         log.log("INFO", f"训练 Schema 标签 {len(schema_label_order)} 类: {schema_label_order}")
         log.progress(RunStatus.PREPARING, 4, f"样本分布 train={len(texts_by_split['train'])} val={len(texts_by_split['validation'])} test={len(texts_by_split['test'])}")
         artifact_service.check_disk_space(500 * 1024 * 1024, multiple=3.0)
@@ -528,11 +526,11 @@ class RunExecutor:
         artifact_service.write_json(
             workdir / "label_schema.json",
             {
-                "schema_format": "intent-schema-v2",
-                "schema_id": schema_row.id if schema_row is not None else None,
-                "schema_hash": schema_row.hash if schema_row is not None else None,
+                "schema_format": schema.document.schema_format,
+                "schema_id": schema.schema_id,
+                "schema_hash": schema.schema_hash,
                 "labels": label_order,
-                "label_definitions": schema_doc.to_dict()["labels"],
+                "label_definitions": schema.document.to_dict()["labels"],
             },
         )
         artifact_service.write_json(

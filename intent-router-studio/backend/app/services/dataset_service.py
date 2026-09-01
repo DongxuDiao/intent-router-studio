@@ -19,6 +19,7 @@ from app import ids
 from app.config import get_settings
 from app.errors import ApiError, NotFoundError
 from app.models import DatasetQualityReport, DatasetSplit, DatasetVersion, Project, Upload
+from app.router_core.label_schema import ResolvedLabelSchema
 from app.router_core.normalization import NORMALIZATION_VERSION, normalized_hash
 from app.router_core.splitting import DEFAULT_RATIOS, group_split
 from app.router_core.taxonomy import LABEL_SCHEMA_VERSION
@@ -148,13 +149,13 @@ def save_upload(db: Session, project_id: str, original_name: str, content: bytes
         raise
 
 
-def _project_label_keys(db: Session, project_id: str) -> list[str]:
-    """导入/标注/校验的合法标签集合（自定义意图标签 §6.3）：
-    项目 ACTIVE Schema 的 active 标签；无 Schema 时回退兼容五分类。"""
-    from app.services.label_schema_service import active_document
+def _dataset_label_schema(db: Session, dataset: DatasetVersion) -> ResolvedLabelSchema:
+    """数据集操作（校验/改标/派生/切分）的合法标签集合：只认数据集绑定 Schema
+    （Review 修复 §4：项目发布新 Schema 不影响旧数据集）。"""
+    from app.services.label_schema_service import resolve_dataset_schema
 
-    _, doc = active_document(db, project_id)
-    return doc.label_keys_in_order()
+    return resolve_dataset_schema(db, dataset)
+
 
 def _guard_xlsx(content: bytes, settings) -> None:
     """V2 §4.4：XLSX 压缩炸弹防护——解压后总大小 / sheet 数 / 首表行列上限。"""
@@ -302,7 +303,14 @@ def import_upload(db: Session, upload_id: str, config: dict) -> DatasetVersion:
     if mode == "prelabeled" and not label_col:
         raise ApiError("VALIDATION_ERROR", "已标注数据导入必须映射标签列", 422)
     default_label = config.get("default_label")
-    import_valid_labels = _project_label_keys(db, upload.project_id)
+    # Review 修复 §3.1：导入开始时一次性解析 Active Schema；同一版本同时用于
+    # 标签校验、schema_id 落库与 manifest——导入期间发布新 Schema 不影响本次导入。
+    from app.services.label_schema_service import active_document
+
+    schema_row, schema_doc = active_document(db, upload.project_id)
+    if schema_row is None:
+        raise ApiError("LABEL_SCHEMA_NOT_FOUND", "项目没有生效的标签 Schema，无法导入数据", 409)
+    import_valid_labels = schema_doc.label_keys_in_order()
     if mode == "single_label" and default_label not in import_valid_labels:
         raise ApiError("VALIDATION_ERROR", f"按标签导入需要合法标签，得到 {default_label!r}", 422)
 
@@ -477,6 +485,7 @@ def import_upload(db: Session, upload_id: str, config: dict) -> DatasetVersion:
         name=config.get("name") or upload.original_name,
         origin="import",
         status=status,
+        schema_id=schema_row.id,
         parquet_path=str(parquet_path),
         raw_path=upload.safe_path,
         sample_count=len(frame),
@@ -488,6 +497,10 @@ def import_upload(db: Session, upload_id: str, config: dict) -> DatasetVersion:
             "source_upload_id": upload.id,
             "raw_sha256": upload.sha256,
             "import_config": {"mode": mode, "columns": columns, "label_mapping": label_mapping, "default_label": default_label},
+            "label_schema_id": schema_row.id,
+            "label_schema_hash": schema_row.hash,
+            "label_schema_format": schema_doc.schema_format,
+            "label_order": import_valid_labels,
             "created_at": datetime.now(UTC).isoformat(),
         },
         change_summary=config.get("change_summary", f"导入自 {upload.original_name}"),
@@ -495,7 +508,9 @@ def import_upload(db: Session, upload_id: str, config: dict) -> DatasetVersion:
     db.add(dataset)
     db.flush()  # 先落 DatasetVersion 行，保证质量报告外键可满足
 
-    report = build_report(errors, warnings, frame)
+    report = build_report(
+        errors, warnings, frame, {d.key: d.effect_type for d in schema_doc.labels}
+    )
     db.add(DatasetQualityReport(id=ids.prefixed("qar"), dataset_id=dataset_id, report_json=report))
 
     upload.status = "IMPORTED"
@@ -513,8 +528,18 @@ def _cell(row: pd.Series, col: str | None) -> str | None:
     return sval or None
 
 
-def build_report(errors: list[dict], warnings: list[dict], frame: pd.DataFrame) -> dict:
+def build_report(
+    errors: list[dict],
+    warnings: list[dict],
+    frame: pd.DataFrame,
+    effect_by_label: dict[str, str] | None = None,
+) -> dict:
     label_counts = frame["label"].value_counts().to_dict() if "label" in frame.columns else {}
+
+    def _effect(label: str) -> str:
+        # 缺映射时按标签名回退（五分类恒等；自定义标签缺映射属上游校验错误）
+        return (effect_by_label or {}).get(label, label)
+
     return {
         "errors": errors,
         "warnings": warnings,
@@ -528,7 +553,7 @@ def build_report(errors: list[dict], warnings: list[dict], frame: pd.DataFrame) 
             "hard_negative": int(frame["is_hard_negative"].sum()) if "is_hard_negative" in frame.columns else 0,
             "max_label_support": int(max(label_counts.values())) if label_counts else 0,
             "min_label_support": int(min(label_counts.values())) if label_counts else 0,
-            "non_write_support": int(sum(v for k, v in label_counts.items() if k != "write_action")),
+            "non_write_support": int(sum(v for k, v in label_counts.items() if _effect(str(k)) != "write_action")),
         },
         "generated_at": datetime.now(UTC).isoformat(),
     }
@@ -612,7 +637,7 @@ def update_sample(db: Session, dataset_id: str, sample_id: str, patch: dict) -> 
     pos = idx[0]
 
     new_label = patch.get("label")
-    valid_labels = _project_label_keys(db, dataset.project_id)
+    valid_labels = list(_dataset_label_schema(db, dataset).label_keys)
     if new_label is not None and new_label not in valid_labels:
         raise ApiError("INVALID_LABEL", f"非法标签 {new_label}（合法: {valid_labels}）", 422)
 
@@ -663,13 +688,15 @@ def validate_dataset(db: Session, dataset_id: str) -> dict:
     warnings: list[dict] = []
 
     # V2 §3.4：非法标签 / 空标签阻断，并指出样本 ID
-    valid_labels = _project_label_keys(db, dataset.project_id)
+    # Review 修复 §4：合法集合来自数据集绑定 Schema，而非项目当前 Active
+    schema = _dataset_label_schema(db, dataset)
+    valid_labels = list(schema.label_keys)
     bad_mask = frame["label"].notna() & (frame["label"] != "") & ~frame["label"].isin(valid_labels)
     if bad_mask.any():
         errors.append(
             {
                 "code": "INVALID_LABEL",
-                "message": f"{int(bad_mask.sum())} 条样本标签不在项目 Schema 内（合法: {valid_labels}）",
+                "message": f"{int(bad_mask.sum())} 条样本标签不在数据集绑定 Schema 内（合法: {valid_labels}）",
                 "details": {
                     "sample_ids": frame.loc[bad_mask, "sample_id"].head(10).tolist(),
                     "labels": sorted(set(frame.loc[bad_mask, "label"])),
@@ -707,14 +734,14 @@ def validate_dataset(db: Session, dataset_id: str) -> dict:
             errors.append(
                 {
                     "code": "MISSING_LABEL_CLASS",
-                    "message": f"缺少类别 {missing_classes}：五分类契约要求冻结前五类齐全",
+                    "message": f"缺少 Schema 规定的训练类别 {missing_classes}：冻结前需全部类别齐全",
                     "details": {"missing": missing_classes, "present": sorted(present)},
                 }
             )
     if len(errors) == 0 and (frame["label"].isna() | (frame["label"] == "")).all():
         errors.append({"code": "NO_LABELS", "message": "数据集没有任何标签", "details": {}})
 
-    report = build_report(errors, warnings, frame)
+    report = build_report(errors, warnings, frame, dict(schema.effect_by_label))
     db.add(DatasetQualityReport(id=ids.prefixed("qar"), dataset_id=dataset_id, report_json=report))
     db.commit()
     return report
@@ -783,7 +810,9 @@ def create_draft(db: Session, source_dataset_id: str, changes: list[dict], name:
     frame = load_dataset_frame(source)
     summary: list[str] = []
 
-    draft_valid_labels = _project_label_keys(db, source.project_id)
+    # Review 修复 §4.1：派生草稿只能使用源数据集绑定 Schema 的 active 标签，
+    # 项目已发布的新标签不能直接写入旧数据集
+    draft_valid_labels = list(_dataset_label_schema(db, source).label_keys)
     for change in changes:
         action = change.get("action")
         if action == "update":
@@ -850,6 +879,7 @@ def create_draft(db: Session, source_dataset_id: str, changes: list[dict], name:
         name=name or f"{source.name} 草稿",
         origin="draft",
         status="DRAFT",
+        schema_id=source.schema_id,  # Review 修复 §4.1：派生继承源 Schema
         parquet_path=str(parquet_path),
         sample_count=len(frame),
         manifest={**(source.manifest or {}), "parent_id": source.id, "created_at": datetime.now(UTC).isoformat()},

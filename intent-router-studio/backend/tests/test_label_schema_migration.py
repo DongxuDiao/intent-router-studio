@@ -54,7 +54,7 @@ def _old_project_with_schema(engine) -> tuple[str, str, str]:
             }
             conn.execute(text(
                 "INSERT INTO label_schema_versions (id, project_id, version, schema_json, hash, created_at)"
-                " VALUES (:id, 'prj_old', :v, :sj, :h, '2026-01-0%s 00:00:00')" % ver
+                f" VALUES (:id, 'prj_old', :v, :sj, :h, '2026-01-0{ver} 00:00:00')"
             ), {"id": f"lsv_old{ver}", "v": ver, "sj": json.dumps(doc, ensure_ascii=False), "h": "0" * 64})
         conn.execute(text(
             "INSERT INTO dataset_versions (id, project_id, version, name, origin, status, parquet_path,"
@@ -124,7 +124,7 @@ def test_upgrade_creates_default_schema_for_project_without_any():
             assert row is not None and row[1] == "ACTIVE"
             doc = json.loads(row[2])
             assert doc["schema_format"] == "intent-schema-v2"
-            assert [l["key"] for l in doc["labels"]] == [
+            assert [lb["key"] for lb in doc["labels"]] == [
                 "information", "read_only", "write_action", "unclear", "oos",
             ]
-            assert all(l["effect_type"] == l["key"] for l in doc["labels"])
+            assert all(lb["effect_type"] == lb["key"] for lb in doc["labels"])
