@@ -10,6 +10,7 @@ import {
   FileSearchOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
+  TagsOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { Suspense, lazy } from 'react'
@@ -24,6 +25,7 @@ const Datasets = lazy(() => import('./pages/Datasets'))
 const DatasetDetail = lazy(() => import('./pages/DatasetDetail'))
 const UploadWizard = lazy(() => import('./pages/UploadWizard'))
 const LabelWorkbench = lazy(() => import('./pages/LabelWorkbench'))
+const LabelSchemas = lazy(() => import('./pages/LabelSchemas'))
 const NewRun = lazy(() => import('./pages/NewRun'))
 const Runs = lazy(() => import('./pages/Runs'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
@@ -47,6 +49,7 @@ const MENU = [
   { key: '/overview', icon: <DashboardOutlined />, label: '总览' },
   { key: '/datasets', icon: <DatabaseOutlined />, label: '数据集' },
   { key: '/datasets/upload', icon: <AppstoreOutlined />, label: '导入数据' },
+  { key: '/labels', icon: <TagsOutlined />, label: '意图标签' },
   { key: '/training/new', icon: <ThunderboltOutlined />, label: '发起训练' },
   { key: '/runs', icon: <PlayCircleOutlined />, label: '训练运行' },
   { key: '/models', icon: <CloudServerOutlined />, label: '模型注册表' },
@@ -106,6 +109,7 @@ export default function App() {
             <Route path="/datasets/upload" element={<UploadWizard />} />
             <Route path="/datasets/:id" element={<DatasetDetail />} />
             <Route path="/datasets/:id/label" element={<LabelWorkbench />} />
+            <Route path="/labels" element={<LabelSchemas />} />
             <Route path="/training/new" element={<NewRun />} />
             <Route path="/runs" element={<Runs />} />
             <Route path="/runs/:id" element={<RunDetail />} />

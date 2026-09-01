@@ -18,4 +18,14 @@ describe('标签导入映射', () => {
   it('非法目标标签不能启用导入', () => {
     expect(isLabelMappingComplete(['知识问答'], { 知识问答: 'not-a-label' })).toBe(false)
   })
+
+  it('自定义意图标签按项目 Schema 的合法集合校验（§7.2）', () => {
+    const custom = ['faq', 'status_query', 'create_task']
+    // 五分类合法值在自定义 Schema 项目中不再默认通过
+    expect(isLabelMappingComplete(['information'], {}, custom)).toBe(false)
+    expect(resolveLabelMapping('create_task', {}, custom)).toBe('create_task')
+    expect(isLabelMappingComplete(['创建任务'], { 创建任务: 'create_task' }, custom)).toBe(true)
+    // 五分类旧值需显式映射或跳过
+    expect(isLabelMappingComplete(['information'], { information: '__skip__' }, custom)).toBe(true)
+  })
 })

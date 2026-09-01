@@ -1,12 +1,18 @@
 /** 基础展示组件。 */
 import { Progress, Space, Statistic, Tag, Typography } from 'antd'
 import type { ReactNode } from 'react'
-import { LABEL_COLORS, LABEL_NAMES } from '../types'
+import { EFFECT_TYPE_COLORS, EFFECT_TYPE_NAMES, LABEL_COLORS, LABEL_NAMES } from '../types'
 import { fmtPercent } from '../utils/format'
 
 export function LabelTag({ label }: { label: string | null | undefined }) {
   if (!label) return <Tag>未标注</Tag>
   return <Tag color={LABEL_COLORS[label] ?? 'default'}>{LABEL_NAMES[label] ?? label}</Tag>
+}
+
+/** 系统效果类型标签：安全语义（阈值/上限/门禁）只由 effect type 决定（§7.1） */
+export function EffectTypeTag({ effect }: { effect: string | null | undefined }) {
+  if (!effect) return <Tag>未映射</Tag>
+  return <Tag color={EFFECT_TYPE_COLORS[effect] ?? 'default'}>{EFFECT_TYPE_NAMES[effect] ?? effect}</Tag>
 }
 
 const RUN_STATUS_META: Record<string, { color: string; text: string }> = {

@@ -427,6 +427,7 @@ def register_model(db: Session, run_id: str, threshold_version_id: str | None = 
         threshold_id_used = None
 
     metrics = artifact_service.read_json(art / "metrics.json")
+    label_schema = artifact_service.read_json(art / "label_schema.json")
     test_metrics = metrics.get("test", {}).get("routing", {})
     cls_metrics = metrics.get("test", {}).get("classification", {})
     manifest = artifact_service.build_manifest(
@@ -435,6 +436,8 @@ def register_model(db: Session, run_id: str, threshold_version_id: str | None = 
             "model_version": f"intent-router-{model_id[-8:]}",
             "base_model": run.config["train"]["base_model_id"],
             "dataset_version_id": run.dataset_id,
+            "schema_id": label_schema.get("schema_id"),
+            "schema_hash": label_schema.get("schema_hash"),
             "split_id": run.split_id,
             "label_schema_version": "labels-v1",
             "run_id": run_id,

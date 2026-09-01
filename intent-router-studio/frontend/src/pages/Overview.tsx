@@ -3,19 +3,17 @@ import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Card, Col, Empty, Row, Space, Table, Typography } from 'antd'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import { DatasetStatusTag, LabelTag, PageHeader, RunStatusTag } from '../components/common'
+import { DatasetStatusTag, EffectTypeTag, PageHeader, RunStatusTag } from '../components/common'
+import { useActiveSchema } from '../hooks/labelSchema'
 import { useProject } from '../store/project'
-import type { DatasetVersion, LabelSchema, ModelVersion, TrainingRun } from '../types'
+import { EFFECT_CEILING_NAMES } from '../types'
+import type { DatasetVersion, ModelVersion, TrainingRun } from '../types'
 import { fmtTime } from '../utils/format'
 
 export default function Overview() {
   const { projectId } = useProject()
 
-  const schema = useQuery({
-    queryKey: ['label-schema', projectId],
-    enabled: !!projectId,
-    queryFn: () => api<LabelSchema>(`/projects/${projectId}/label-schema`),
-  })
+  const schema = useActiveSchema(projectId)
   const datasets = useQuery({
     queryKey: ['datasets', projectId],
     enabled: !!projectId,
@@ -54,22 +52,29 @@ export default function Overview() {
       />
       <Row gutter={[16, 16]}>
         <Col span={14}>
-          <Card title="标签 Schema（5 分类，固定不可改）" size="small">
+          <Card title="标签 Schema" size="small" extra={<Link to="/labels">管理 Schema</Link>}>
             <Table
               size="small"
               pagination={false}
               loading={schema.isLoading}
-              dataSource={schema.data?.labels ?? []}
+              dataSource={schema.data?.document.labels ?? []}
               rowKey="key"
               columns={[
-                { title: '标签', dataIndex: 'key', width: 130, render: (k: string) => <LabelTag label={k} /> },
+                { title: '标签 Key', dataIndex: 'key', width: 140 },
                 { title: '名称', dataIndex: 'name', width: 110 },
-                { title: '定义', dataIndex: 'definition' },
+                { title: '定义', dataIndex: 'description' },
+                {
+                  title: '系统效果',
+                  dataIndex: 'effect_type',
+                  width: 180,
+                  render: (effectType: string) => <EffectTypeTag effect={effectType} />,
+                },
                 {
                   title: '效果上限',
-                  width: 150,
-                  render: (_, r: { key: string }) =>
-                    r.key === 'write_action' ? 'external_write_candidate（永不自动执行）' : r.key === 'read_only' ? 'read_only' : 'none',
+                  width: 140,
+                  render: (_, r: { effect_type: string }) => EFFECT_CEILING_NAMES[
+                    r.effect_type === 'write_action' ? 'external_write_candidate' : r.effect_type === 'read_only' ? 'read_only' : 'none'
+                  ],
                 },
               ]}
             />

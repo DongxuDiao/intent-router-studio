@@ -5,8 +5,9 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { LabelTag, PageHeader, ProbBars } from '../components/common'
 import { QueryRewritePanel } from '../components/rewrite'
+import { activeSchemaLabels, useActiveSchema, useSchemaDetail } from '../hooks/labelSchema'
 import { useProject } from '../store/project'
-import { EFFECT_CEILING_NAMES, GATE_NAMES, LABELS, LABEL_NAMES, intentName, isWriteEffect } from '../types'
+import { EFFECT_CEILING_NAMES, GATE_NAMES, LABEL_NAMES, intentKey, intentName, isWriteEffect } from '../types'
 import type { ModelVersion, PredictResult } from '../types'
 import { fmtMs, fmtTime } from '../utils/format'
 import {
@@ -83,6 +84,10 @@ export default function Playground() {
     enabled: !!projectId,
     queryFn: () => api<{ items: { id: string; text: string | null; text_hash: string; expected_label: string | null; predicted_route: string | null; is_correct: boolean | null; created_at: string }[] }>(`/projects/${projectId}/playground-cases`),
   })
+  const activeModel = models.data?.items.find((m) => m.status === 'ACTIVE')
+  const modelSchema = useSchemaDetail(projectId, activeModel?.schema_id ?? lastPredict?.schema_id)
+  const projectSchema = useActiveSchema(projectId)
+  const expectedLabels = activeSchemaLabels(modelSchema.data ?? projectSchema.data)
 
   const predict = useMutation({
     mutationFn: () =>
@@ -183,7 +188,6 @@ export default function Playground() {
       </Button>
     </Space>
   )
-  const activeModel = models.data?.items.find((m) => m.status === 'ACTIVE')
   if (!activeModel) {
     return (
       <div>
@@ -240,8 +244,8 @@ export default function Playground() {
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <select value={expected ?? ''} onChange={(e) => { const v = e.target.value || null; setExpected(v); patchPlaygroundCache(projectId, { expected: v }) }} style={{ padding: '4px 8px' }}>
                       <option value="">期望标签（可选）</option>
-                      {LABELS.map((l) => (
-                        <option key={l} value={l}>{l} · {LABEL_NAMES[l]}</option>
+                      {expectedLabels.map((label) => (
+                        <option key={label.key} value={label.key}>{label.key} · {label.name}</option>
                       ))}
                     </select>
                     <span>
@@ -250,7 +254,7 @@ export default function Playground() {
                     <Button
                       size="small"
                       disabled={!lastPredict || predict.isPending}
-                      onClick={() => lastPredict && saveCase.mutate(lastPredict.route)}
+                      onClick={() => lastPredict && saveCase.mutate(intentKey(lastPredict) ?? lastPredict.route)}
                       loading={saveCase.isPending}
                     >
                       保存案例

@@ -235,7 +235,10 @@ def test_three_class_full_run_e2e(client, project_id, db, monkeypatch):
     # 6. 注册 → 激活 → 在线预测
     model = client.post(f"/api/v1/runs/{run_id}/register-model", json={})
     assert model.status_code == 200, model.text
-    model_id = model.json()["id"]
+    model_doc = model.json()
+    assert model_doc["schema_id"] == schema_id
+    assert model_doc["schema_hash"] == schema_payload["schema_hash"]
+    model_id = model_doc["id"]
     activated = client.post(f"/api/v1/models/{model_id}/activate")
     assert activated.status_code == 200, activated.text
 

@@ -1,21 +1,15 @@
-/** 标注台：键盘 1-5 快速打标，支持过滤未标注；仅 DRAFT 数据集可编辑。 */
+/** 标注台：键盘 1-9 快速打标，支持过滤未标注；仅 DRAFT 数据集可编辑。
+ * 标签选项来自该数据集绑定的 Schema 版本（§7.2），展示「业务名称 + 效果徽标」，
+ * 不再使用前端固定五分类。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Card, Checkbox, Input, Space, Spin, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
-import { LabelTag, PageHeader } from '../components/common'
+import { EffectTypeTag, LabelTag, PageHeader } from '../components/common'
+import { activeSchemaLabels, useSchemaDetail } from '../hooks/labelSchema'
 import { useProject } from '../store/project'
-import { LABELS, LABEL_NAMES } from '../types'
 import type { DatasetVersion, Sample } from '../types'
-
-const KEY_TO_LABEL: Record<string, string> = {
-  '1': 'information',
-  '2': 'read_only',
-  '3': 'write_action',
-  '4': 'unclear',
-  '5': 'oos',
-}
 
 export default function LabelWorkbench() {
   const { id } = useParams<{ id: string }>()
@@ -45,11 +39,20 @@ export default function LabelWorkbench() {
   const list = samples.data?.samples ?? []
   const current = list[cursor]
 
+  // 数据集绑定的 Schema（Review 修复 §3.1）：历史数据集按导入时版本展示标签，
+  // 不跟随项目当前生效版本
+  const schemaQuery = useSchemaDetail(
+    dataset.data?.project_id,
+    dataset.data?.schema_id ?? (dataset.data?.manifest?.label_schema_id as string | undefined),
+  )
+  const schemaLabels = activeSchemaLabels(schemaQuery.data)
+
   const patch = useMutation({
     mutationFn: (payload: { label?: string; is_hard_negative?: boolean }) =>
       api(`/datasets/${id}/samples/${current!.sample_id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     onSuccess: (_d, payload) => {
-      message.success({ content: `已标注 → ${payload.label ? LABEL_NAMES[payload.label] : '难负例'}（${current!.sample_id.slice(0, 10)}…）`, duration: 0.8 })
+      const labelName = payload.label ? schemaLabels.find((item) => item.key === payload.label)?.name ?? payload.label : '难负例'
+      message.success({ content: `已标注 → ${labelName}（${current!.sample_id.slice(0, 10)}…）`, duration: 0.8 })
       qc.invalidateQueries({ queryKey: ['samples-label', id] })
       qc.invalidateQueries({ queryKey: ['dataset', id] })
       if (cursor >= list.length - 1) {
@@ -64,12 +67,16 @@ export default function LabelWorkbench() {
     },
   })
 
-  // 键盘快捷键 1-5
+  // 键盘快捷键 1-9 → 数据集 Schema 的第 N 个启用标签
+  const keyToLabel = (key: string): string | null => {
+    const idx = Number(key) - 1
+    return Number.isInteger(idx) && idx >= 0 && idx < schemaLabels.length ? schemaLabels[idx].key : null
+  }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (busy || !current) return
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      const label = KEY_TO_LABEL[e.key]
+      const label = keyToLabel(e.key)
       if (label) {
         setBusy(true)
         patch.mutate({ label }, { onSettled: () => setBusy(false) })
@@ -77,7 +84,8 @@ export default function LabelWorkbench() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [current, busy])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, busy, schemaLabels])
 
   const d = dataset.data
   if (dataset.isLoading) return <Card loading />
@@ -98,7 +106,7 @@ export default function LabelWorkbench() {
     <div>
       <PageHeader
         title={`标注台 · ${d.name}`}
-        subTitle={`共 ${d.sample_count} 样本，未标注 ${d.unlabeled_count}；快捷键 1-5 打标并自动跳下一条`}
+        subTitle={`共 ${d.sample_count} 样本，未标注 ${d.unlabeled_count}；快捷键 1-${Math.min(schemaLabels.length, 9)} 打标并自动跳下一条`}
         extra={<Button onClick={() => navigate(`/datasets/${d.id}`)}>返回详情</Button>}
       />
       <Space style={{ marginBottom: 12 }} wrap>
@@ -141,21 +149,32 @@ export default function LabelWorkbench() {
               </div>
             )}
             <Typography.Paragraph style={{ fontSize: 18 }}>{current.text}</Typography.Paragraph>
-            <Space wrap style={{ marginBottom: 16 }}>
-              {LABELS.map((l, i) => (
-                <Button
-                  key={l}
-                  type={current.label === l ? 'primary' : 'default'}
-                  loading={busy && patch.variables?.label === l}
-                  onClick={() => {
-                    setBusy(true)
-                    patch.mutate({ label: l }, { onSettled: () => setBusy(false) })
-                  }}
-                >
-                  {i + 1} · {LABEL_NAMES[l]}
-                </Button>
-              ))}
-            </Space>
+            {schemaQuery.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="Schema 加载失败"
+                description="无法取得该数据集绑定的标签定义；刷新重试，切勿凭记忆手工输入标签。"
+              />
+            ) : (
+              <Space wrap style={{ marginBottom: 16 }}>
+                {schemaLabels.map((l) => (
+                  <Button
+                    key={l.key}
+                    type={current.label === l.key ? 'primary' : 'default'}
+                    loading={busy && patch.variables?.label === l.key}
+                    onClick={() => {
+                      setBusy(true)
+                      patch.mutate({ label: l.key }, { onSettled: () => setBusy(false) })
+                    }}
+                  >
+                    {l.index + 1} · {l.name || l.key}
+                    {l.effect_type ? <EffectTypeTag effect={l.effect_type} /> : null}
+                  </Button>
+                ))}
+              </Space>
+            )}
             <div>
               <Space>
                 <Checkbox

@@ -19,6 +19,26 @@ export const LABEL_COLORS: Record<string, string> = {
   oos: 'default',
 }
 
+/** 系统效果类型固定枚举（自定义意图标签 §4.1）：安全语义只由它决定 */
+export const EFFECT_TYPES = LABELS
+export type EffectType = Label
+
+export const EFFECT_TYPE_NAMES: Record<string, string> = {
+  information: '提供信息（无副作用）',
+  read_only: '只读查询',
+  write_action: '外部写入（仅候选资格）',
+  unclear: '澄清兜底',
+  oos: '能力边界',
+}
+
+export const EFFECT_TYPE_COLORS: Record<string, string> = {
+  information: 'blue',
+  read_only: 'cyan',
+  write_action: 'volcano',
+  unclear: 'purple',
+  oos: 'default',
+}
+
 export const EFFECT_CEILING_NAMES: Record<string, string> = {
   none: '无副作用',
   read_only: '只读',
@@ -100,6 +120,8 @@ export interface DatasetVersion {
   id: string
   project_id: string
   parent_id: string | null
+  /** 数据集绑定的 Schema 版本（导入时固定；历史数据/标注/派生均按它展示） */
+  schema_id: string | null
   version: number
   name: string
   origin: string
@@ -327,6 +349,8 @@ export interface ModelVersion {
   name: string
   status: 'CANDIDATE' | 'VALIDATED' | 'ACTIVE' | 'ARCHIVED'
   manifest: Record<string, unknown> | null
+  schema_id?: string | null
+  schema_hash?: string | null
   metrics_summary: { macro_f1?: number; false_write_rate?: number; safe_coverage?: number } | null
   created_at: string
   activated_at: string | null
@@ -672,4 +696,54 @@ export interface RewriteHealth {
     rewrite_latency_ms: { p50: number | null; p95: number | null; n: number }
     cache_size: number
   }
+}
+
+// ---- 标签 Schema 管理（自定义意图标签 §5 / §7.1）----
+
+export interface LabelDefinitionInput {
+  key: string
+  name: string
+  effect_type: EffectType | string
+  description?: string
+  status?: 'active' | 'deprecated'
+  order?: number
+  positive_examples?: string[]
+  negative_examples?: string[]
+}
+
+export interface LabelSchemaInfo {
+  id: string
+  project_id: string
+  version: number
+  status: 'DRAFT' | 'ACTIVE' | 'SUPERSEDED'
+  parent_id: string | null
+  change_summary: string
+  created_by: string
+  hash: string
+  schema_format: string
+  active_label_count: number
+  deprecated_label_count: number
+  label_keys: string[]
+  published_at: string | null
+  created_at: string
+  references: { datasets?: number; runs?: number; models?: number }
+}
+
+export interface LabelSchemaDetail extends LabelSchemaInfo {
+  schema_json: { schema_format: string; labels: LabelDefinitionInput[]; reserved_decisions?: string[] }
+  document: { schema_format: string; labels: LabelDefinitionInput[]; reserved_decisions?: string[] }
+}
+
+export interface SchemaImpact {
+  schema_id: string
+  base_schema_id: string | null
+  breaking: boolean
+  added: string[]
+  removed: string[]
+  deprecated: string[]
+  effect_type_changed: { key: string; from: string; to: string }[]
+  affected_datasets: number
+  affected_runs: number
+  affected_models: number
+  requires_retraining: boolean
 }

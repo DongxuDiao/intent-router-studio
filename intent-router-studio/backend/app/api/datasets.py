@@ -38,6 +38,7 @@ def _dataset_to_dict(d: DatasetVersion, db: Session) -> dict:
         "parent_id": d.parent_id,
         "version": d.version,
         "name": d.name,
+        "schema_id": d.schema_id,  # 数据集绑定的 Schema 版本（Review 修复 §3.1；前端动态标签依据）
         "origin": d.origin,
         "status": d.status,
         "sample_count": d.sample_count,

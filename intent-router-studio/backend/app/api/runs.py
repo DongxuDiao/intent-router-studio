@@ -182,7 +182,7 @@ def register_model(run_id: str, payload: RegisterModelRequest, db: Session = Dep
     from app.api.models import model_to_dict
 
     model = run_service.register_model(db, run_id, payload.threshold_version_id, payload.name)
-    return model_to_dict(model)
+    return model_to_dict(model, db)
 
 
 @router.post("/runs/{run_id}/errors/draft")

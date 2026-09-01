@@ -2,12 +2,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Card, Steps, Table, Typography, Upload as AntUpload, message } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError, uploadFile } from '../api/client'
 import { LabelTag, PageHeader } from '../components/common'
 import { useProject } from '../store/project'
-import { LABELS, LABEL_NAMES } from '../types'
+import { activeSchemaLabels, useActiveSchema } from '../hooks/labelSchema'
 import type { DatasetVersion, PreviewData, Upload as UploadInfo } from '../types'
 import { fmtBytes } from '../utils/format'
 import { isLabelMappingComplete, resolveLabelMapping } from '../utils/importMapping'
@@ -103,8 +103,20 @@ export default function UploadWizard() {
     else if (preview) setColumns((c) => ({ ...c, label: c.label ?? preview.suggested_columns.label ?? null }))
   }
 
+  // 标签映射目标来自项目当前生效 Schema（§7.2）；加载失败不渲染假选项
+  const activeSchema = useActiveSchema(projectId)
+  const schemaLabels = activeSchemaLabels(activeSchema.data)
+  const validLabels = schemaLabels.length ? schemaLabels.map((l) => l.key) : []
+  useEffect(() => {
+    if (validLabels.length > 0 && !validLabels.includes(defaultLabel)) setDefaultLabel(validLabels[0])
+  }, [defaultLabel, validLabels])
+  const labelOption = (key: string) => {
+    const def = schemaLabels.find((l) => l.key === key)
+    return `${key} · ${def?.name ?? key}${def?.effect_type ? `（${def.effect_type}）` : ''}`
+  }
+
   const canImport = !!preview && !!columns.text && (mode !== 'single_label' || defaultLabel) &&
-    isLabelMappingComplete(distinctLabels, labelMapping)
+    isLabelMappingComplete(distinctLabels, labelMapping, validLabels)
 
   if (!projectId) return <Alert type="info" showIcon message="请先选择项目" />
 
@@ -205,8 +217,8 @@ export default function UploadWizard() {
               <span>
                 <Typography.Text type="secondary">统一标签：</Typography.Text>
                 <select value={defaultLabel} onChange={(e) => setDefaultLabel(e.target.value)} style={{ padding: '4px 8px' }}>
-                  {LABELS.map((l) => (
-                    <option key={l} value={l}>{l} · {LABEL_NAMES[l]}</option>
+                  {schemaLabels.map((l) => (
+                    <option key={l.key} value={l.key}>{labelOption(l.key)}</option>
                   ))}
                 </select>
               </span>
@@ -239,8 +251,8 @@ export default function UploadWizard() {
                         style={{ padding: '4px 8px', width: 200 }}
                       >
                         <option value="">（未映射 → 将报 INVALID_LABEL 错误）</option>
-                        {LABELS.map((l) => (
-                          <option key={l} value={l}>{l} · {LABEL_NAMES[l]}</option>
+                        {schemaLabels.map((l) => (
+                          <option key={l.key} value={l.key}>{labelOption(l.key)}</option>
                         ))}
                         <option value="__skip__">__skip__（跳过该行）</option>
                       </select>
