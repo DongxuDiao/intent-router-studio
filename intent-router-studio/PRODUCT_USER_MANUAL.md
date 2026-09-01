@@ -442,15 +442,20 @@ Playground 默认把当前项目的上次输入、选项和结果保存在浏览
 
 | 字段 | 含义 |
 |---|---|
-| `route` | 最终路由标签 |
+| `route` | 最终路由（= 系统效果类型，兼容字段） |
+| `effect_type` | 系统效果类型（与 `route` 恒相等；阈值/上限/门禁只看它） |
+| `intent` | 业务意图 `{key, name}`；旧五分类模型下 key=name=效果类型 |
 | `decision` | `accept` 或进入澄清/拒识 |
 | `confidence` | Top-1 校准后概率 |
 | `margin` | Top-1 与 Top-2 概率差 |
-| `probabilities` | 五分类概率分布 |
+| `probabilities` | 分类概率分布（列顺序 = 训练 Schema 标签表） |
 | `reason_codes` | 阈值、margin 或安全门的机器可读原因 |
-| `effect_ceiling` | 当前路由允许的最大效果范围 |
+| `effect_ceiling` | 当前效果类型允许的最大效果范围 |
 | `required_next_gate` | 下游仍需经过的门控 |
+| `schema_id` / `schema_hash` | 本次模型训练时绑定的标签 Schema 溯源 |
 | `model_version_id` | 本次使用的模型版本 |
+
+项目使用自定义意图标签时，`intent` 是业务层（如 `create_task`），`route`/`effect_type` 是系统层（如 `write_action`）：写入阈值、效果上限和确认门一律按系统层生效。判断"是否写操作"请永远检查 `effect_type === "write_action"`，不要比较业务标签名。
 
 即使结果为 `write_action`，下游也必须继续执行 Skill 匹配、参数校验、风险检查和用户确认。
 

@@ -13,6 +13,16 @@ router = APIRouter(prefix="/inference", tags=["inference"])
 
 @router.post("/predict")
 def predict(payload: PredictRequest, db: Session = Depends(get_db)) -> dict:
+    """单条推理。
+
+    响应为两层契约（自定义意图标签 Review 修复 §9.1）：
+    - `intent` = `{key, name}` 业务意图（name 来自制品 label_definitions；
+      旧五分类模型恒等，key=name=效果类型）；
+    - `route` / `effect_type` = 系统效果类型（两者恒相等；阈值、效果上限、
+      下游门禁一律按 effect_type 生效，与业务标签名无关）；
+    - 附带 `schema_id` / `schema_hash` 溯源（训练时绑定的 Schema 版本）。
+    """
+
     return inference_service.predict(
         db,
         payload.project_id,

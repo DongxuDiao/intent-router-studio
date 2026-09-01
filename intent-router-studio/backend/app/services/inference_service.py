@@ -140,6 +140,8 @@ def _attach_query_understanding(
             "downstream_query_source": understanding["downstream_query_source"],
             "safety_decision": understanding["safety_decision"],
             "route_consistent": understanding["route_consistent"],
+            # Review 修复 §8.1：非 trace 视图同样暴露业务意图漂移标记（只记录不拦截）
+            "intent_consistent": understanding.get("intent_consistent"),
             "fallback_reason": understanding.get("fallback_reason"),
         }
     return result

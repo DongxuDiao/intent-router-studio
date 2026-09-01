@@ -29,6 +29,15 @@
 
 该 Schema 是安全契约而非普通业务标签：模型可以重训、阈值可以调节，但动作效果上限和下游门禁不会由模型分数覆盖。
 
+## 自定义意图标签（两层安全路由）
+
+上述五分类同时是平台的**系统效果类型**固定枚举。项目可通过 `label-schemas` API 用自己的业务意图标签训练路由器：
+
+- 每个业务标签（如 `create_task`、`status_query`）必须映射到唯一的系统效果类型（`create_task → write_action`）；Schema 版本发布后不可变，数据集在导入时绑定当时的 Schema 版本；
+- 阈值（含写入专用阈值）、效果上限与下游门禁一律按**服务端解析的系统效果类型**生效，与标签叫什么无关：任何映射到 `write_action` 的业务标签都会走更严的写入阈值、`external_write_candidate` 上限与 `skill_match_and_confirmation` 确认门；
+- 推理响应为两层结构：`intent` = `{key, name}`（业务意图，name 来自 Schema 定义），`route`/`effect_type` = 系统效果类型（`route` 为兼容字段，两者恒相等），并携带 `schema_id`/`schema_hash` 溯源；旧五分类模型是恒等映射，行为与历史逐字节一致；
+- 训练制品 `label_schema.json`（`intent-schema-v2`）必须完整携带 `label_definitions`；Worker 打包前校验标签与分类头逐位一致、定义不缺不重、效果合法、哈希可复算，加载侧对缺映射/非法映射一律 `MODEL_SCHEMA_MISMATCH` 拒绝服务（fail closed）。
+
 ## 快速开始（Docker，推荐）
 
 前置要求：Docker Desktop（本仓库在 Apple Silicon / arm64 与 x86_64 Linux 均可构建）。
@@ -175,7 +184,7 @@ SKIP_E2E=1 ./scripts/ci.sh          # 无本地栈时跳过 E2E
 ## 核心安全机制
 
 1. **效果上限（effect_ceiling）**：`write_action` → `external_write_candidate`（永不自动执行）；`read_only` → `read_only`；其余 → `none`。每个路由附带 `required_next_gate`。
-2. **策略门**：label 相关阈值（write 更严）+ top1/top2 margin → `accept` / `unclear`（转人工），输出机器可读 `reason_codes`。
+2. **策略门**：按系统效果类型取阈值（write 更严）+ top1/top2 margin → `accept` / `unclear`（转人工），输出机器可读 `reason_codes`；自定义标签经 Schema 映射到效果类型后适用同一套门。
 3. **约束阈值搜索**：在 validation 上网格搜索，硬约束 `false_write_rate ≤ 0.005` 且 `write_precision ≥ 0.95`，目标最大化 `safe_coverage`；无可行解回退保守默认阈值。手动调节同样受约束，违反即 422 拒绝保存。
 4. **不可变性**：数据集冻结（FROZEN）后不可原地修改（修改走 draft→新版本）；训练配置/超参白名单校验；制品 manifest 哈希校验（激活与注册时 verify，防篡改）。
 5. **激活原子性**：verify → 临时加载冒烟 → 事务内切换 → 运行时热替换；任一步失败不影响旧模型。
